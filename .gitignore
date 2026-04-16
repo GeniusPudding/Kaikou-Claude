@@ -1,0 +1,13 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.wav
+.DS_Store
+.vscode/
+.idea/
+*.egg-info/
+.pytest_cache/
+# Per-user Claude Code local overrides (permission prompts, etc.)
+.claude/
