@@ -83,6 +83,28 @@ def start_recording():
     print("● 錄音中...", flush=True)
 
 
+def _paste_without_submit(text: str):
+    """Copy text to clipboard and paste into the active window, without pressing Enter."""
+    payload = f"{text}{config.VOICE_MARKER}" if config.VOICE_MARKER else text
+    saved = ""
+    try:
+        saved = pyperclip.paste()
+    except Exception:
+        pass
+    pyperclip.copy(payload)
+    time.sleep(0.05)
+    paste_modifier = kb.Key.cmd if config.IS_MAC else kb.Key.ctrl
+    _kb_ctrl.press(paste_modifier)
+    _kb_ctrl.press("v")
+    _kb_ctrl.release("v")
+    _kb_ctrl.release(paste_modifier)
+    time.sleep(0.25)
+    try:
+        pyperclip.copy(saved)
+    except Exception:
+        pass
+
+
 def _paste_and_submit(text: str):
     payload = f"{text}{config.VOICE_MARKER}" if config.VOICE_MARKER else text
     saved = ""
@@ -109,7 +131,12 @@ def _paste_and_submit(text: str):
 
 
 def stop_and_submit():
-    """Stop the active recording, transcribe, and paste + submit the text."""
+    """Stop the active recording, transcribe, and paste the text for manual confirmation.
+
+    Unlike _paste_and_submit (which may auto-submit), this version always
+    leaves the text in the clipboard so the user can review it and press
+    Enter manually in Claude Code.
+    """
     with _lock:
         if not _state["recording"]:
             return
@@ -143,8 +170,11 @@ def stop_and_submit():
     if not text:
         print("× 轉錄結果為空", flush=True)
         return
+
+    # Paste text WITHOUT auto-submit; user presses Enter manually to send.
+    _paste_without_submit(text)
     print(f"→ {text}", flush=True)
-    _paste_and_submit(text)
+    print("✓ 已粘貼，請手動按 Enter 確認發送", flush=True)
     _beep(1200, 70)
 
 

@@ -32,6 +32,7 @@ def _print_hotkey_help():
         print("  (非 Windows:空白鍵不攔截,只用 F9。macOS 需授予 Accessibility 權限;Linux 需 X11 + xdotool。)")
     print("CC 焦點偵測:前景視窗 process tree 內有 claude / node claude cli")
     print(f"語音標記後綴:{config.VOICE_MARKER!r}")
+    print("粘貼後需手動按 Enter 確認發送\n", flush=True)
     print("Ctrl+C 離開\n", flush=True)
 
 
