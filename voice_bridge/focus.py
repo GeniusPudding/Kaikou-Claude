@@ -21,13 +21,22 @@ import psutil
 from . import config
 
 
-def _build_get_foreground_pid():
+def _build_foreground_helpers():
+    """Return three closures: (get_pid, get_key, get_title).
+
+    * get_pid  — PID of the process that owns the foreground window.
+    * get_key  — fast cache key that changes when the foreground changes.
+    * get_title — text title of the foreground window (used to distinguish
+      among multiple windows of the same Electron app).
+    """
     if config.IS_WIN:
         import ctypes
         from ctypes import wintypes
 
         user32 = ctypes.WinDLL("user32", use_last_error=True)
         user32.GetForegroundWindow.restype = wintypes.HWND
+        user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
+        user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
         user32.GetWindowThreadProcessId.argtypes = [
             wintypes.HWND, ctypes.POINTER(wintypes.DWORD),
         ]
@@ -41,10 +50,18 @@ def _build_get_foreground_pid():
             return int(pid.value or 0)
 
         def get_key():
-            # hwnd is a stable handle per foreground window.
             return int(user32.GetForegroundWindow() or 0)
 
-        return get_pid, get_key
+        def get_title():
+            hwnd = user32.GetForegroundWindow()
+            if not hwnd:
+                return ""
+            length = user32.GetWindowTextLengthW(hwnd)
+            buf = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(hwnd, buf, length + 1)
+            return buf.value
+
+        return get_pid, get_key, get_title
 
     if config.IS_MAC:
         def get_pid():
@@ -58,11 +75,13 @@ def _build_get_foreground_pid():
         def get_key():
             return get_pid()
 
-        return get_pid, get_key
+        def get_title():
+            # NSWorkspace doesn't expose per-window title easily; skip.
+            return ""
 
-    # Linux / BSD — X11 via xdotool. Wayland returns 0 and focus detection
-    # silently fails; that is acceptable as a fallback since the hotkey loop
-    # keeps working, just without "only-when-CC-is-focused" gating.
+        return get_pid, get_key, get_title
+
+    # Linux / BSD
     import subprocess
 
     def get_pid():
@@ -76,13 +95,22 @@ def _build_get_foreground_pid():
                 subprocess.TimeoutExpired, ValueError):
             return 0
 
+    def get_title():
+        try:
+            return subprocess.check_output(
+                ["xdotool", "getactivewindow", "getactivewindow", "--name"],
+                stderr=subprocess.DEVNULL, timeout=0.3, text=True,
+            ).strip()
+        except Exception:
+            return ""
+
     def get_key():
         return get_pid()
 
-    return get_pid, get_key
+    return get_pid, get_key, get_title
 
 
-_get_foreground_pid, _get_foreground_key = _build_get_foreground_pid()
+_get_foreground_pid, _get_foreground_key, _get_foreground_title = _build_foreground_helpers()
 
 
 def _looks_like_cc(proc: psutil.Process) -> bool:
@@ -103,22 +131,72 @@ def _looks_like_cc(proc: psutil.Process) -> bool:
     return False
 
 
+def _find_app_root(pid: int) -> int:
+    """Walk up the process tree as long as the parent has the same executable
+    name, and return the topmost PID.
+
+    This handles multi-process apps like Electron (VS Code, Claude Desktop)
+    where the foreground window belongs to a renderer process but the Claude
+    Code extension lives under a different branch of the same Code.exe tree.
+    """
+    try:
+        proc = psutil.Process(pid)
+        name = (proc.name() or "").lower()
+    except psutil.NoSuchProcess:
+        return pid
+    root_pid = pid
+    cur = proc
+    for _ in range(20):
+        try:
+            parent = cur.parent()
+            if parent is None:
+                break
+            if (parent.name() or "").lower() != name:
+                break
+            root_pid = parent.pid
+            cur = parent
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            break
+    return root_pid
+
+
 def _fg_tree_has_claude(pid: int) -> bool:
     if not pid:
         return False
+    # For multi-process apps (Electron), walk up to the app root first so
+    # we search the entire process tree, not just the renderer's subtree.
+    root_pid = _find_app_root(pid)
+    is_multi_process = (root_pid != pid)
+
+    found = False
     try:
-        root = psutil.Process(pid)
+        root = psutil.Process(root_pid)
     except psutil.NoSuchProcess:
         return False
     if _looks_like_cc(root):
-        return True
-    try:
-        for child in root.children(recursive=True):
-            if _looks_like_cc(child):
-                return True
-    except (psutil.NoSuchProcess, psutil.AccessDenied):
-        pass
-    return False
+        found = True
+    else:
+        try:
+            for child in root.children(recursive=True):
+                if _looks_like_cc(child):
+                    found = True
+                    break
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+
+    if not found:
+        return False
+
+    # When the app has multiple windows under one process tree (e.g. VS
+    # Code with many windows, only one of which has Claude active), use the
+    # window title as a secondary filter so voice doesn't fire in the wrong
+    # window. Single-process terminals (WindowsTerminal, iTerm) skip this.
+    if is_multi_process:
+        title = _get_foreground_title().lower()
+        if title and "claude" not in title:
+            return False
+
+    return True
 
 
 _cache = {"ts": 0.0, "key": None, "is_cc": False}

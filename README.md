@@ -2,17 +2,57 @@
 
 # Kaikou-Claude(開口即克)
 
-Local, offline Chinese voice input for [Claude Code](https://docs.anthropic.com/claude/docs/claude-code). Hold a hotkey in the Claude Code terminal, speak, release — the transcription is pasted and submitted. Powered by [faster-whisper](https://github.com/SYSTRAN/faster-whisper). No API keys.
+Local, offline Chinese voice input for [Claude Code](https://docs.anthropic.com/claude/docs/claude-code) and [Claude Desktop](https://claude.ai/download). Hold a hotkey, speak, release — the transcription is pasted and submitted. Powered by [faster-whisper](https://github.com/SYSTRAN/faster-whisper). No API keys.
+
+> **Note:** Focus detection matches any window whose process tree contains `claude.exe` or `node … claude`, so both Claude Code (terminal & VS Code extension) and Claude Desktop are supported. The `<voice>` sentinel and ASR error tolerance (via `CLAUDE.md`) are only active in Claude Code; Claude Desktop receives the raw transcription.
 
 ## Platform support
 
-| Platform | Status | Primary hotkey | Backup | Notes |
-|----------|--------|----------------|--------|-------|
-| Windows  | **Stable** | Space (hold) | F9 (hold) | Win32 LL hook does selective Space suppression — tap = literal space, hold = voice. |
-| macOS    | 🚧 Experimental — untested | F9 (hold) | — | Grant Accessibility permission on first run (pynput needs it to observe global keys). |
-| Linux    | 🚧 Experimental — untested | F9 (hold) | — | X11 / XWayland only. `xdotool` recommended for focus gating; without it F9 still works but isn't scoped to Claude Code. |
+| Platform | Status | Hotkey | Notes |
+|----------|--------|--------|-------|
+| Windows  | **Stable** | **Space (hold)** | Tap = literal space, hold ≥ 250 ms = voice. |
+| macOS    | 🚧 Untested | F9 (hold) | Requires Accessibility permission. |
+| Linux    | 🚧 Untested | F9 (hold) | X11 only; install `xdotool` for focus gating. |
 
-Space is used as a hotkey only on Windows, where the LL hook cleanly distinguishes a tap from a hold. macOS / Linux fall back to F9 because pynput cannot selectively suppress a typing key portably without breaking IME toggles.
+On Windows a low-level keyboard hook selectively intercepts Space without breaking typing or IME. macOS / Linux cannot do this portably, so they use F9 instead.
+
+## How it works
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  You open `claude`                                      │
+│    → SessionStart hook runs scripts/start-voice.{ps1,sh}│
+│    → Daemon launches in background                      │
+│    → Whisper model loaded (CUDA auto-detected)          │
+│    → Keyboard hook installed                            │
+└─────────────────────────────────────────────────────────┘
+                        ↓
+┌─────────────────────────────────────────────────────────┐
+│  You hold the hotkey (Space on Win, F9 on Mac/Linux)    │
+│    → Focus check: foreground process tree has claude?   │
+│      • Windows: Win32 GetForegroundWindow + psutil tree │
+│      • macOS:   NSWorkspace + psutil tree               │
+│      • Linux:   xdotool + psutil tree                   │
+│    → If yes: start recording via sounddevice            │
+└─────────────────────────────────────────────────────────┘
+                        ↓
+┌─────────────────────────────────────────────────────────┐
+│  You release the key                                    │
+│    → Audio transcribed locally by faster-whisper        │
+│    → Text + <voice> marker copied to clipboard          │
+│    → Ctrl+V (or Cmd+V on mac) pastes into focused window│
+│    → Enter submits (if VOICE_AUTO_SUBMIT=1)             │
+└─────────────────────────────────────────────────────────┘
+                        ↓
+┌─────────────────────────────────────────────────────────┐
+│  You close `claude`                                     │
+│    → SessionEnd hook decrements session counter         │
+│    → Daemon killed only when counter reaches zero       │
+│      (safe for multiple concurrent sessions)            │
+└─────────────────────────────────────────────────────────┘
+```
+
+Everything runs locally — no network calls, no API keys, no data leaves your machine. The Whisper model is downloaded once from Hugging Face and cached on disk.
 
 ## Features
 
@@ -67,14 +107,12 @@ Removes this project's `SessionStart` / `SessionEnd` entries from `~/.claude/set
 
 Once installed, just use Claude Code as normal — the daemon auto-starts on each session and shuts down cleanly when the last session ends (see [Multi-session](#multi-session)). The internal launcher scripts under `scripts/` are invoked by the hooks; run them manually only for debugging.
 
-| Platform | Key | Action |
-|----------|-----|--------|
-| Windows | Space (tap) | Literal space |
-| Windows | Space (hold ≥ 250 ms) | Record → transcribe → paste → submit |
-| Windows | F9 (hold) | Same, backup hotkey |
-| macOS / Linux | F9 (hold) | Record → transcribe → paste → submit |
+| Key | Action |
+|-----|--------|
+| Space tap | Literal space (normal typing) |
+| Space hold ≥ 250 ms | Record → transcribe → paste → submit |
 
-Beeps (Windows only): 880 Hz start, 440 Hz stop, 1200 Hz submitted.
+On macOS / Linux, use F9 (hold) instead of Space.
 
 ## Configuration
 
@@ -83,7 +121,7 @@ Set in `.env` or the environment.
 | Variable | Default | Notes |
 |----------|---------|-------|
 | `VOICE_LANGUAGE` | `zh` | Whisper language hint |
-| `VOICE_AUTO_SUBMIT` | `1` | `0` pastes without pressing Enter |
+| `VOICE_AUTO_SUBMIT` | `1` | `0` pastes without pressing Enter — lets you review or mix voice with typed text before submitting manually. With `1` (default), transcription errors are tolerated by Claude via the `<voice>` marker, so auto-submit is safe for most use cases. |
 | `VOICE_HOLD_THRESHOLD_SEC` | `0.25` | Space tap/hold cutoff |
 | `VOICE_MARKER` | ` <voice>` | Sentinel suffix; empty disables |
 | `WHISPER_MODEL_SIZE` | `medium` (cuda) / `small` (cpu) | |
@@ -115,7 +153,6 @@ A session counter at `%TEMP%\claude-voice.sessions` (`$TMPDIR/claude-voice.sessi
 ## Troubleshooting
 
 - **No beep / no action on hotkey.** Focus detection didn't match. Check `claude-voice.log` for a recent `● 錄音中...` line; if absent, the foreground window's process tree doesn't contain a `claude.exe` / `claude` / `node ... claude` process. Verify with `tasklist` (Windows), `ps -ef | grep claude` (Unix).
-- **macOS: nothing happens on F9.** First run must be approved under System Settings → Privacy & Security → Accessibility. Add your terminal app (or the Python binary) there.
-- **Linux: focus gating always False.** Install `xdotool`. Wayland sessions need XWayland; pure Wayland compositors have no portable "active window PID" API.
+- **macOS / Linux: nothing happens on F9.** macOS: approve under System Settings → Privacy & Security → Accessibility. Linux: install `xdotool`; Wayland needs XWayland.
 - **Empty transcription.** VAD dropped the clip — speak for at least ~500 ms.
 - **Windows: Space also types nothing outside Claude Code.** Restart via `scripts\stop-voice.ps1 -Force` then `scripts\start-voice.ps1`.

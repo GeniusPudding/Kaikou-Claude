@@ -16,7 +16,7 @@ script="$voice_dir/voice_to_claude.py"
 
 # ASCII-safe JSON with unicode escapes; the hook prints this to stdout so
 # Claude Code can surface it as a systemMessage to the user.
-msg='{"systemMessage":"\u4e2d\u6587\u8a9e\u97f3\u5df2\u555f\u52d5 \u2014 \u5728 Claude Code \u8996\u7a97\u6309\u4f4f F9 \u8b1b\u4e2d\u6587,\u653e\u958b\u81ea\u52d5\u9001\u51fa"}'
+msg='{"systemMessage":"\u4e2d\u6587\u8a9e\u97f3\u5df2\u555f\u52d5 \u2014 \u6309\u4f4f F9 \u8b1b\u4e2d\u6587,\u653e\u958b\u81ea\u52d5\u9001\u51fa"}'
 
 daemon_alive=0
 if [[ -f "$pid_file" ]]; then
