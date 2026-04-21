@@ -11,10 +11,11 @@
 | 平台 | 狀態 | 熱鍵 | 備註 |
 |------|------|------|------|
 | Windows | **穩定** | **空白鍵(按住)** | 短按 = 一般空白,長按 ≥ 250ms = 語音 |
-| macOS | 🚧 尚未驗證 | F9(按住) | 需授權「輔助使用」權限 |
-| Linux | 🚧 尚未驗證 | F9(按住) | 僅限 X11,需安裝 `xdotool` |
+| macOS | 🚧 尚未驗證 | **Cmd(單獨按住)** | Cmd+其他鍵 = 正常快捷鍵。需授權「輔助使用」權限 |
 
-Windows 用低階鍵盤 hook 能選擇性攔截空白鍵而不影響打字和 IME。macOS / Linux 無法做到,改用 F9。
+> **SSH / 遠端使用：** 安裝在你**鍵盤所在的那台機器**（本地 Mac 或 Windows），不是遠端 server。daemon 在本地攔截鍵盤並貼上——對 SSH 終端機裡跑的 Claude Code 透明運作。
+>
+> **Linux 桌面（少見）：** 如果你真的坐在 Linux 桌面前,裝在本地即可,熱鍵是 F9。需要 X11 + `xdotool`。
 
 ## 運作原理
 
@@ -111,7 +112,7 @@ git pull
 | 空白鍵(短按) | 一般空白字元(正常打字) |
 | 空白鍵(按住 ≥ 250ms) | 錄音 → 轉錄 → 貼上 → 送出 |
 
-macOS / Linux 改用 F9(按住)。
+macOS 改用 Cmd(單獨按住,Cmd+其他鍵照常不觸發)。
 
 ## 設定
 
@@ -139,7 +140,7 @@ macOS / Linux 改用 F9(按住)。
 
 ## 多開共用
 
-Session 計數器位在 `%TEMP%\claude-voice.sessions`(Unix 是 `$TMPDIR/claude-voice.sessions`)— 每次 `SessionStart` +1、`SessionEnd` -1,**歸零**才真的殺 daemon。同時開好幾個 Claude Code 視窗時,關其中一個不會把其他視窗的語音搞壞。`uninstall.{ps1,sh}` 與 `stop-voice.{ps1,sh} --force` 會跳過計數器直接殺。
+`SessionEnd` hook 只在**系統上不再有任何 `claude` process** 時才殺 daemon。只要還有任何 Claude Code（或 Claude Desktop）視窗在跑,daemon 就不會消失。`uninstall.{ps1,sh}` 和 `stop-voice.{ps1,sh} --force` 會跳過檢查強制殺。
 
 ## 日誌
 

@@ -11,10 +11,11 @@ Local, offline Chinese voice input for [Claude Code](https://docs.anthropic.com/
 | Platform | Status | Hotkey | Notes |
 |----------|--------|--------|-------|
 | Windows  | **Stable** | **Space (hold)** | Tap = literal space, hold ≥ 250 ms = voice. |
-| macOS    | 🚧 Untested | F9 (hold) | Requires Accessibility permission. |
-| Linux    | 🚧 Untested | F9 (hold) | X11 only; install `xdotool` for focus gating. |
+| macOS    | 🚧 Untested | **Cmd (hold alone)** | Cmd+other key = normal shortcut. Requires Accessibility permission. |
 
-On Windows a low-level keyboard hook selectively intercepts Space without breaking typing or IME. macOS / Linux cannot do this portably, so they use F9 instead.
+> **SSH / remote usage:** Install on the machine where your keyboard is (your local Mac or Windows), not on the remote server. The daemon intercepts keys and pastes locally — it works transparently in SSH terminals running Claude Code on a remote host.
+>
+> **Linux desktop (rare):** If you're sitting at a physical Linux machine, install locally; the hotkey is F9. Requires X11 and `xdotool`.
 
 ## How it works
 
@@ -112,7 +113,7 @@ Once installed, just use Claude Code as normal — the daemon auto-starts on eac
 | Space tap | Literal space (normal typing) |
 | Space hold ≥ 250 ms | Record → transcribe → paste → submit |
 
-On macOS / Linux, use F9 (hold) instead of Space.
+On macOS, hold Cmd alone (Cmd+other key = normal shortcut, won't trigger voice).
 
 ## Configuration
 
@@ -140,7 +141,7 @@ Claude is instructed (via `CLAUDE.md`) to treat marked prompts as spoken languag
 
 ## Multi-session
 
-A session counter at `%TEMP%\claude-voice.sessions` (`$TMPDIR/claude-voice.sessions` on Unix) is incremented by each `SessionStart` and decremented by each `SessionEnd`. The daemon is only killed when the counter reaches zero — closing one Claude Code window won't break voice in the others. `uninstall.ps1` / `uninstall.sh` and `stop-voice.{ps1,sh} --force` bypass the counter.
+The `SessionEnd` hook only kills the daemon when **no `claude` process remains alive** on the system. As long as any Claude Code (or Claude Desktop) window is open, the daemon stays running. `uninstall.{ps1,sh}` and `stop-voice.{ps1,sh} --force` bypass this check and kill unconditionally.
 
 ## Logs
 

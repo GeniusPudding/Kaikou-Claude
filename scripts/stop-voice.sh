@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
-# SessionEnd hook: decrement the session counter and kill the daemon only
-# when the last session closes. Pass --force (or -Force) to bypass the
-# counter — used by uninstall.sh.
+# Kill the daemon only when no Claude process remains alive.
+# Pass --force to tear down unconditionally (used by uninstall.sh).
 
 set -u
 
 tmp_dir="${TMPDIR:-/tmp}"
 pid_file="$tmp_dir/claude-voice.pid"
-sess_file="$tmp_dir/claude-voice.sessions"
 
 force=0
 case "${1:-}" in
@@ -25,7 +23,6 @@ kill_daemon() {
         fi
         rm -f "$pid_file"
     fi
-    rm -f "$sess_file"
 }
 
 if [[ $force -eq 1 ]]; then
@@ -33,15 +30,11 @@ if [[ $force -eq 1 ]]; then
     exit 0
 fi
 
-count=0
-if [[ -f "$sess_file" ]]; then
-    count=$(head -n 1 "$sess_file" 2>/dev/null || echo 0)
-    [[ "$count" =~ ^[0-9]+$ ]] || count=0
+# If any claude process is still alive, keep daemon running.
+claude_count=$(pgrep -c -f '[c]laude' 2>/dev/null || echo 0)
+if (( claude_count > 0 )); then
+    echo "$claude_count claude process(es) still alive; daemon kept alive"
+    exit 0
 fi
-count=$((count - 1))
-if (( count <= 0 )); then
-    kill_daemon
-else
-    echo "$count" > "$sess_file"
-    echo "session closed; $count session(s) still active; daemon kept alive"
-fi
+
+kill_daemon

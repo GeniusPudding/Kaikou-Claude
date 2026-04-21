@@ -26,10 +26,12 @@ def _print_hotkey_help():
     print("熱鍵(僅在 Claude Code 焦點時生效,其它時候透明):")
     if config.IS_WIN:
         print(f"  Space(按住 ≥{config.HOLD_THRESHOLD_SEC}s)→ 中文語音,短按則當普通空白")
-        print("  F9(按住)→ 中文語音(備用熱鍵)")
+    elif config.IS_MAC:
+        print(f"  Cmd(單獨按住 ≥{config.HOLD_THRESHOLD_SEC}s)→ 中文語音")
+        print("  (Cmd+其他鍵 = 正常快捷鍵,不會觸發語音。需授予 Accessibility 權限。)")
     else:
         print("  F9(按住)→ 中文語音")
-        print("  (非 Windows:空白鍵不攔截,只用 F9。macOS 需授予 Accessibility 權限;Linux 需 X11 + xdotool。)")
+        print("  (Linux 需 X11 + xdotool。)")
     print("CC 焦點偵測:前景視窗 process tree 內有 claude / node claude cli")
     print(f"語音標記後綴:{config.VOICE_MARKER!r}")
     print("Ctrl+C 離開\n", flush=True)
