@@ -90,21 +90,33 @@ chmod +x "$repo_dir/scripts/start-voice.sh" "$repo_dir/scripts/stop-voice.sh" 2>
 mkdir -p "$(dirname "$settings_file")"
 "$venv_python" "$patch_script" "$settings_file" install unix "$repo_dir"
 
-# 8. Advisory GPU probe.
-has_cuda=$("$venv_python" -c "import ctranslate2,sys; sys.stdout.write('1' if ctranslate2.get_cuda_device_count()>0 else '0')" 2>/dev/null || echo 0)
-if [[ "$has_cuda" == "1" ]]; then
-    device_msg="CUDA 偵測:OK(將使用 GPU + medium 模型)"
-else
-    device_msg="CUDA 偵測:無(將使用 CPU + small 模型)"
+# 8. Pre-download Whisper model (auto-detect GPU -> pick model size).
+echo "下載 Whisper 模型(首次需要,之後從快取讀取)..."
+"$venv_python" -c "
+import ctranslate2
+from faster_whisper import WhisperModel
+device = 'cuda' if ctranslate2.get_cuda_device_count() > 0 else 'cpu'
+compute = 'float16' if device == 'cuda' else 'int8'
+model_size = 'medium' if device == 'cuda' else 'small'
+print(f'  {model_size} ({device}, {compute})')
+WhisperModel(model_size, device=device, compute_type=compute)
+print('  done')
+" || echo "Model download failed (non-fatal; will retry on first launch)"
+
+# 9. If an AI session is already running, start daemon now.
+# Whitelist — keep in sync with _AI_TITLE_KEYWORDS in focus.py.
+if pgrep -f 'claude|gemini|aider|codex' >/dev/null 2>&1; then
+    echo "Detected running AI session; starting daemon now..."
+    bash "$repo_dir/scripts/start-voice.sh" >/dev/null 2>&1
 fi
 
 echo
-echo "=== 完成 ==="
-echo "$device_msg"
-echo "打開新的 Claude Code session (\`claude\`) → daemon 自動啟動"
-echo "在 Claude Code 視窗按住 F9 講中文 → 放開自動送出"
-if [[ "$uname_s" == "Darwin" ]]; then
-    echo "(macOS 首次使用會跳 Accessibility 權限請求,同意後才能攔截 F9)"
+echo "=== Done ==="
+if [[ "$(uname -s)" == "Darwin" ]]; then
+    echo "Hold Cmd to speak Chinese -> release to submit"
+    echo "(First run requires Accessibility permission)"
+else
+    echo "Hold F9 to speak Chinese -> release to submit"
 fi
 echo
-echo "移除:./uninstall.sh"
+echo "Uninstall: ./uninstall.sh"

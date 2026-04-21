@@ -89,6 +89,12 @@ def main():
         hooks["SessionStart"].append(build_group(start_cmd))
         hooks["SessionEnd"].append(build_group(stop_cmd))
 
+        # Disable Claude Code's built-in English-only voice to avoid
+        # conflicting with Kaikou-Claude's Chinese voice on the same hotkey.
+        settings["voiceEnabled"] = False
+        if "voice" in settings:
+            settings["voice"]["enabled"] = False
+
     if not hooks["SessionStart"]:
         del hooks["SessionStart"]
     if not hooks["SessionEnd"]:

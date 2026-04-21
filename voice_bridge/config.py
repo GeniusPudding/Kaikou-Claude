@@ -25,7 +25,7 @@ LANGUAGE = os.getenv("VOICE_LANGUAGE", "zh")
 AUTO_SUBMIT = os.getenv("VOICE_AUTO_SUBMIT", "1") == "1"
 VOICE_MARKER = os.getenv("VOICE_MARKER", " <voice>")
 HOLD_THRESHOLD_SEC = float(os.getenv("VOICE_HOLD_THRESHOLD_SEC", "0.25"))
-FOCUS_CACHE_TTL_SEC = float(os.getenv("FOCUS_CACHE_TTL_SEC", "0.3"))
+FOCUS_CACHE_TTL_SEC = float(os.getenv("FOCUS_CACHE_TTL_SEC", "0.05"))
 
 
 def _detect_cuda() -> bool:

@@ -76,8 +76,35 @@ def _build_foreground_helpers():
             return get_pid()
 
         def get_title():
-            # NSWorkspace doesn't expose per-window title easily; skip.
-            return ""
+            # Use Quartz Window Services to get the title of the frontmost window of the frontmost app.
+            try:
+                from AppKit import NSWorkspace
+                from Quartz import (
+                    CGWindowListCopyWindowInfo, kCGWindowListOptionOnScreenOnly,
+                    kCGNullWindowID, kCGWindowListExcludeDesktopElements
+                )
+                
+                app = NSWorkspace.sharedWorkspace().frontmostApplication()
+                if not app:
+                    return ""
+                
+                pid = app.processIdentifier()
+                # Get all on-screen windows
+                window_list = CGWindowListCopyWindowInfo(
+                    kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
+                    kCGNullWindowID
+                )
+                
+                for window in window_list:
+                    if window.get("kCGWindowOwnerPID") == pid:
+                        # The first window in the list for this PID is usually the frontmost one.
+                        # Some apps (like Chrome) might have "invisible" windows, but
+                        # kCGWindowLayer 0 is typically the main window layer.
+                        if window.get("kCGWindowLayer") == 0:
+                            return window.get("kCGWindowName", "")
+                return ""
+            except Exception:
+                return ""
 
         return get_pid, get_key, get_title
 
@@ -160,59 +187,149 @@ def _find_app_root(pid: int) -> int:
     return root_pid
 
 
-def _fg_tree_has_claude(pid: int) -> bool:
+# Terminal process names (used to identify terminal windows).
+_TERMINAL_APPS = {
+    # Windows
+    "windowsterminal.exe", "wt.exe", "powershell.exe", "pwsh.exe",
+    "cmd.exe", "conhost.exe",
+    # macOS
+    "terminal", "iterm2", "warp",
+    # Linux
+    "gnome-terminal-server", "konsole", "xfce4-terminal", "alacritty",
+    "wezterm-gui", "kitty", "tilix",
+}
+
+# === CANONICAL WHITELIST ===
+# AI coding assistant keywords matched in window titles and process names.
+# Other scripts (install.ps1, install.sh, stop-voice.ps1, stop-voice.sh)
+# duplicate this list for process detection — keep them in sync when adding
+# new tools.
+_AI_TITLE_KEYWORDS = ("claude", "gemini", "aider", "codex", "copilot")
+
+
+def _is_voice_target(pid: int) -> bool:
+    """Determine whether the foreground window is a valid voice target.
+
+    Returns True when the user is actively interacting with an AI coding
+    assistant — not in a plain terminal doing general shell work.
+
+    Logic:
+      1. If the foreground process itself is Claude (claude.exe) → yes.
+      2. If the foreground is a terminal app → check window title for AI
+         agent keywords (title reflects the active tab).
+      3. If it's a multi-process Electron app (VS Code, Claude Desktop) →
+         check process tree for claude AND verify title.
+    """
     if not pid:
         return False
-    # For multi-process apps (Electron), walk up to the app root first so
-    # we search the entire process tree, not just the renderer's subtree.
+
     root_pid = _find_app_root(pid)
     is_multi_process = (root_pid != pid)
 
-    found = False
     try:
-        root = psutil.Process(root_pid)
+        fg_proc = psutil.Process(pid)
+        fg_name = (fg_proc.name() or "").lower()
     except psutil.NoSuchProcess:
         return False
-    if _looks_like_cc(root):
-        found = True
-    else:
+
+    # Check 1: foreground IS a Claude-like process directly (Claude Desktop).
+    if fg_name in ("claude", "claude.exe"):
+        return True
+
+    # Check 2: foreground is a terminal → title must contain an AI keyword.
+    is_terminal = fg_name in _TERMINAL_APPS
+    if not is_terminal and is_multi_process:
         try:
-            for child in root.children(recursive=True):
-                if _looks_like_cc(child):
-                    found = True
-                    break
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            root_name = (psutil.Process(root_pid).name() or "").lower()
+            is_terminal = root_name in _TERMINAL_APPS
+        except psutil.NoSuchProcess:
             pass
 
-    if not found:
-        return False
+    if is_terminal:
+        title = _get_foreground_title()
+        title_lower = title.lower()
 
-    # When the app has multiple windows under one process tree (e.g. VS
-    # Code with many windows, only one of which has Claude active), use the
-    # window title as a secondary filter so voice doesn't fire in the wrong
-    # window. Single-process terminals (WindowsTerminal, iTerm) skip this.
-    if is_multi_process:
-        title = _get_foreground_title().lower()
-        if title and "claude" not in title:
+        # Claude Code uses braille spinner chars (U+2800–U+28FF) in title.
+        if title and 0x2800 <= ord(title[0]) <= 0x28FF:
+            return True
+
+        # Explicit AI keyword in title.
+        if any(kw in title_lower for kw in _AI_TITLE_KEYWORDS):
+            return True
+
+        # If title looks like a default shell prompt → definitely not AI.
+        _SHELL_PREFIXES = (
+            "windows powershell", "powershell", "pwsh", "cmd",
+            "c:\\", "d:\\", "~", "bash", "zsh", "fish",
+            "administrator:",
+        )
+        if any(title_lower.startswith(p) for p in _SHELL_PREFIXES):
             return False
 
-    return True
-
-
-_cache = {"ts": 0.0, "key": None, "is_cc": False}
-_lock = threading.Lock()
-
-
-def is_claude_code_focused() -> bool:
-    key = _get_foreground_key()
-    if not key:
+        # Title is something else (e.g. a project/topic name set by an AI
+        # CLI). Fall back to process-tree check.
+        try:
+            root = psutil.Process(root_pid)
+            for child in root.children(recursive=True):
+                if _looks_like_cc(child):
+                    return True
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
         return False
-    now = time.time()
-    with _lock:
-        if (now - _cache["ts"] < config.FOCUS_CACHE_TTL_SEC
-                and _cache["key"] == key):
-            return _cache["is_cc"]
-    is_cc = _fg_tree_has_claude(_get_foreground_pid())
-    with _lock:
-        _cache.update({"ts": now, "key": key, "is_cc": is_cc})
-    return is_cc
+
+    # Check 3: any non-terminal app — walk the process tree for an AI agent.
+    # Covers Electron apps (VS Code, Claude Desktop) regardless of whether
+    # the foreground PID is the root or a renderer subprocess.  This runs
+    # in a background thread so the LL hook callback is never blocked.
+    try:
+        root = psutil.Process(root_pid)
+        if _looks_like_cc(root):
+            return True
+        for child in root.children(recursive=True):
+            if _looks_like_cc(child):
+                return True
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        pass
+
+    return False
+
+
+if config.IS_WIN:
+    # Windows: background thread to avoid LL hook 300ms timeout.
+    _bg_result = {"is_cc": False}
+
+    def _focus_monitor_loop():
+        while True:
+            try:
+                pid = _get_foreground_pid()
+                _bg_result["is_cc"] = _is_voice_target(pid) if pid else False
+            except Exception:
+                _bg_result["is_cc"] = False
+            time.sleep(config.FOCUS_CACHE_TTL_SEC)
+
+    threading.Thread(target=_focus_monitor_loop, daemon=True).start()
+
+    def is_claude_code_focused() -> bool:
+        return _bg_result["is_cc"]
+
+else:
+    # macOS / Linux: inline check is fine (pynput has no timeout limit).
+    # Quartz/AppKit title APIs need the calling thread's context, so a
+    # background thread would get empty titles and break whitelist filtering.
+    _cache = {"ts": 0.0, "key": None, "is_cc": False}
+    _cache_lock = threading.Lock()
+
+    def is_claude_code_focused() -> bool:
+        key = _get_foreground_key()
+        if not key:
+            return False
+        now = time.time()
+        with _cache_lock:
+            if (now - _cache["ts"] < config.FOCUS_CACHE_TTL_SEC
+                    and _cache["key"] == key):
+                return _cache["is_cc"]
+        pid = _get_foreground_pid()
+        is_cc = _is_voice_target(pid) if pid else False
+        with _cache_lock:
+            _cache.update({"ts": now, "key": key, "is_cc": is_cc})
+        return is_cc

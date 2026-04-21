@@ -30,10 +30,11 @@ if [[ $force -eq 1 ]]; then
     exit 0
 fi
 
-# If any claude process is still alive, keep daemon running.
-claude_count=$(pgrep -c -f '[c]laude' 2>/dev/null || echo 0)
-if (( claude_count > 0 )); then
-    echo "$claude_count claude process(es) still alive; daemon kept alive"
+# If any AI agent process is still alive, keep daemon running.
+# Whitelist — keep in sync with _AI_TITLE_KEYWORDS in focus.py.
+agent_count=$(pgrep -c -f 'claude|gemini|aider|codex' 2>/dev/null || echo 0)
+if (( agent_count > 0 )); then
+    echo "$agent_count AI agent process(es) still alive; daemon kept alive"
     exit 0
 fi
 

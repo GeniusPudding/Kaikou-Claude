@@ -1,133 +1,138 @@
 [English](README.md) · [繁體中文](README.zh-TW.md)
 
-# Kaikou-Claude(開口即克)
+# Kaikou-Claude（開口即克）
 
-Local, offline Chinese voice input for [Claude Code](https://docs.anthropic.com/claude/docs/claude-code) and [Claude Desktop](https://claude.ai/download). Hold a hotkey, speak, release — the transcription is pasted and submitted. Powered by [faster-whisper](https://github.com/SYSTRAN/faster-whisper). No API keys.
+Local, offline Chinese voice input for AI coding assistants. Hold a hotkey, speak, release — the transcription is pasted and submitted into the focused window. Works with any terminal-based AI tool: Claude Code, Claude Desktop, Gemini Code Assist, remote agents via SSH, etc.
 
-> **Note:** Focus detection matches any window whose process tree contains `claude.exe` or `node … claude`, so both Claude Code (terminal & VS Code extension) and Claude Desktop are supported. The `<voice>` sentinel and ASR error tolerance (via `CLAUDE.md`) are only active in Claude Code; Claude Desktop receives the raw transcription.
+Powered by [faster-whisper](https://github.com/SYSTRAN/faster-whisper). No API keys. No data leaves your machine.
+
+## Supported targets
+
+Voice activates when the foreground window is a recognized terminal (iTerm, Terminal.app, Warp, Windows Terminal) or contains `claude` in its process tree / window title. This covers:
+
+- **Claude Code** — terminal, VS Code integrated terminal, SSH
+- **Claude Desktop** — Electron app
+- **Gemini Code Assist / other AI agents** — anything running in a terminal window
+- **Remote agents via SSH** — daemon runs on your local machine, pastes into the SSH session
 
 ## Platform support
 
 | Platform | Status | Hotkey | Notes |
 |----------|--------|--------|-------|
 | Windows  | **Stable** | **Space (hold)** | Tap = literal space, hold ≥ 250 ms = voice. |
-| macOS    | 🚧 Untested | **Cmd (hold alone)** | Cmd+other key = normal shortcut. Requires Accessibility permission. |
+| macOS    | **Stable** | **Cmd (hold)** | Instant recording; Cmd+other key auto-cancels. F9 as backup. Requires Accessibility permission. |
 
-> **SSH / remote usage:** Install on the machine where your keyboard is (your local Mac or Windows), not on the remote server. The daemon intercepts keys and pastes locally — it works transparently in SSH terminals running Claude Code on a remote host.
+> **SSH / remote usage:** Install on the machine where your keyboard is (your local Mac or Windows), not on the remote server. The daemon intercepts keys and pastes locally — it works transparently with any terminal connected to a remote host.
 >
-> **Linux desktop (rare):** If you're sitting at a physical Linux machine, install locally; the hotkey is F9. Requires X11 and `xdotool`.
+> **Linux desktop (rare):** If sitting at a physical Linux machine, install locally; hotkey is F9. Requires X11 and `xdotool`.
 
 ## How it works
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  You open `claude`                                      │
-│    → SessionStart hook runs scripts/start-voice.{ps1,sh}│
-│    → Daemon launches in background                      │
-│    → Whisper model loaded (CUDA auto-detected)          │
-│    → Keyboard hook installed                            │
-└─────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────┐
+│  You open a Claude Code session (or any supported tool)   │
+│    → SessionStart hook launches daemon in background      │
+│    → Whisper model loaded (CUDA auto-detected)            │
+│    → Keyboard hook installed                              │
+└───────────────────────────────────────────────────────────┘
                         ↓
-┌─────────────────────────────────────────────────────────┐
-│  You hold the hotkey (Space on Win, F9 on Mac/Linux)    │
-│    → Focus check: foreground process tree has claude?   │
-│      • Windows: Win32 GetForegroundWindow + psutil tree │
-│      • macOS:   NSWorkspace + psutil tree               │
-│      • Linux:   xdotool + psutil tree                   │
-│    → If yes: start recording via sounddevice            │
-└─────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────┐
+│  You hold the hotkey                                      │
+│    → Focus check: is foreground a supported target?       │
+│      • Windows: Win32 GetForegroundWindow + process tree  │
+│      • macOS: NSWorkspace + Quartz window title + tree    │
+│      • Linux: xdotool + process tree                      │
+│    → If yes: start recording via sounddevice              │
+└───────────────────────────────────────────────────────────┘
                         ↓
-┌─────────────────────────────────────────────────────────┐
-│  You release the key                                    │
-│    → Audio transcribed locally by faster-whisper        │
-│    → Text + <voice> marker copied to clipboard          │
-│    → Ctrl+V (or Cmd+V on mac) pastes into focused window│
-│    → Enter submits (if VOICE_AUTO_SUBMIT=1)             │
-└─────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────┐
+│  You release the key                                      │
+│    → Audio transcribed locally by faster-whisper          │
+│    → Text copied to clipboard                             │
+│    → Ctrl+V (Cmd+V on mac) pastes into focused window    │
+│    → Enter submits (if VOICE_AUTO_SUBMIT=1)               │
+└───────────────────────────────────────────────────────────┘
                         ↓
-┌─────────────────────────────────────────────────────────┐
-│  You close `claude`                                     │
-│    → SessionEnd hook decrements session counter         │
-│    → Daemon killed only when counter reaches zero       │
-│      (safe for multiple concurrent sessions)            │
-└─────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────┐
+│  You close all Claude sessions                            │
+│    → SessionEnd hook checks for remaining claude processes │
+│    → Daemon killed only when none remain                  │
+└───────────────────────────────────────────────────────────┘
 ```
 
-Everything runs locally — no network calls, no API keys, no data leaves your machine. The Whisper model is downloaded once from Hugging Face and cached on disk.
+Everything runs locally — no network calls, no API keys, no data leaves your machine.
 
 ## Features
 
-- **Context-aware.** Hotkeys only fire when Claude Code is the foreground process; everywhere else the hook is transparent.
+- **Context-aware.** Hotkeys only fire when a supported AI tool is the foreground; elsewhere the hook is transparent.
 - **Auto paste + submit.** Transcription is pasted via the clipboard and submitted with Enter.
-- **Voice sentinel.** Every transcription is suffixed with `<voice>` so Claude knows the prompt came from speech and tolerates ASR errors (see [Voice marker](#voice-marker)).
+- **Voice sentinel.** Transcriptions are suffixed with `<voice>` so Claude Code knows the prompt came from speech and tolerates ASR errors (see [Voice marker](#voice-marker)).
 - **CUDA autodetect.** Falls back to CPU `int8` if no GPU or if model load fails.
-- **Multi-session safe.** A session counter keeps the daemon alive while any Claude Code window is open.
+- **Daemon lifecycle.** Stays alive as long as any `claude` process exists; auto-killed when all close.
 
 ## Install
 
 ### Windows
 
 ```powershell
-git clone <repo-url> kaikou-claude
-cd kaikou-claude
+git clone https://github.com/GeniusPudding/Kaikou-Claude.git
+cd Kaikou-Claude
 .\install.ps1
 ```
 
 ### macOS / Linux
 
 ```bash
-git clone <repo-url> kaikou-claude
-cd kaikou-claude
+git clone https://github.com/GeniusPudding/Kaikou-Claude.git
+cd Kaikou-Claude
 ./install.sh
 ```
 
 The installer creates a local `.venv`, installs dependencies, writes a default `.env` (only if missing), and merges `SessionStart` / `SessionEnd` hooks into `~/.claude/settings.json`. It is idempotent — re-run any time to upgrade or repair.
 
-First `claude` session after install downloads the Whisper weights (~500 MB `small` / ~1.5 GB `medium`).
+First session after install downloads the Whisper model (~500 MB `small` / ~1.5 GB `medium`).
 
 ## Reinstall / upgrade
 
-```powershell
+```bash
 git pull
 .\install.ps1        # Windows
 ./install.sh         # macOS / Linux
 ```
 
-Same command as first install. Existing `.venv`, `.env`, and hooks are detected and updated in place; previous `kaikou-claude` hook entries are stripped before the new ones are added, so there's no duplication.
-
 ## Uninstall
 
-```powershell
+```bash
 .\uninstall.ps1      # Windows
 ./uninstall.sh       # macOS / Linux
 ```
 
-Removes this project's `SessionStart` / `SessionEnd` entries from `~/.claude/settings.json` and force-stops the daemon. Other hooks in your settings are preserved. Files on disk (`.venv`, `.env`, source) are kept — delete the directory manually for a clean wipe. To reinstall afterwards, run the install script again.
+Removes hooks from `~/.claude/settings.json` and force-stops the daemon. Other hooks are preserved. Repo files stay on disk — delete the directory manually for a clean wipe.
 
 ## Usage
 
-Once installed, just use Claude Code as normal — the daemon auto-starts on each session and shuts down cleanly when the last session ends (see [Multi-session](#multi-session)). The internal launcher scripts under `scripts/` are invoked by the hooks; run them manually only for debugging.
+Once installed, the daemon auto-starts with each Claude Code session. Just hold the hotkey and talk:
 
-| Key | Action |
-|-----|--------|
-| Space tap | Literal space (normal typing) |
-| Space hold ≥ 250 ms | Record → transcribe → paste → submit |
-
-On macOS, hold Cmd alone (Cmd+other key = normal shortcut, won't trigger voice).
+| Platform | Key | Action |
+|----------|-----|--------|
+| Windows | Space tap | Literal space (normal typing) |
+| Windows | Space hold ≥ 250 ms | Record → transcribe → paste → submit |
+| macOS | Cmd hold | Record instantly → release to submit |
+| macOS | Cmd + other key | Normal shortcut (auto-cancels voice) |
 
 ## Configuration
 
-Set in `.env` or the environment.
+Set in `.env` (located in the repo root).
 
 | Variable | Default | Notes |
 |----------|---------|-------|
 | `VOICE_LANGUAGE` | `zh` | Whisper language hint |
-| `VOICE_AUTO_SUBMIT` | `1` | `0` pastes without pressing Enter — lets you review or mix voice with typed text before submitting manually. With `1` (default), transcription errors are tolerated by Claude via the `<voice>` marker, so auto-submit is safe for most use cases. |
-| `VOICE_HOLD_THRESHOLD_SEC` | `0.25` | Space tap/hold cutoff |
+| `VOICE_AUTO_SUBMIT` | `1` | `0` = paste only, don't press Enter. Lets you review/edit or mix voice + typing before submitting. With `1` (default), ASR errors are tolerated via the `<voice>` marker. |
+| `VOICE_HOLD_THRESHOLD_SEC` | `0.25` | Windows Space tap/hold cutoff (not used on macOS) |
 | `VOICE_MARKER` | ` <voice>` | Sentinel suffix; empty disables |
-| `WHISPER_MODEL_SIZE` | `medium` (cuda) / `small` (cpu) | |
+| `WHISPER_MODEL_SIZE` | auto | `medium` on CUDA, `small` on CPU |
 | `WHISPER_DEVICE` | auto | `cuda` or `cpu` |
-| `WHISPER_COMPUTE_TYPE` | auto | `float16` / `int8` |
+| `WHISPER_COMPUTE_TYPE` | auto | `float16` on CUDA, `int8` on CPU |
 
 ## Voice marker
 
@@ -137,11 +142,11 @@ Each transcribed prompt is sent as:
 今天天氣如何 <voice>
 ```
 
-Claude is instructed (via `CLAUDE.md`) to treat marked prompts as spoken language — tolerate homophones, fix wrong tones, ignore missing punctuation, and not echo the tag back. Set `VOICE_MARKER=` to disable.
+In Claude Code, `CLAUDE.md` instructs Claude to treat `<voice>`-marked prompts as spoken language — tolerate homophones, fix wrong tones, ignore missing punctuation. Other tools (Gemini, Claude Desktop) receive the raw text with the marker; it's harmless but you can disable it with `VOICE_MARKER=`.
 
-## Multi-session
+## Daemon lifecycle
 
-The `SessionEnd` hook only kills the daemon when **no `claude` process remains alive** on the system. As long as any Claude Code (or Claude Desktop) window is open, the daemon stays running. `uninstall.{ps1,sh}` and `stop-voice.{ps1,sh} --force` bypass this check and kill unconditionally.
+The daemon stays alive as long as any `claude` process exists on the system. When the last one exits and `SessionEnd` fires, the daemon shuts down. No counter files, no drift — just a live process check.
 
 ## Logs
 
@@ -149,11 +154,45 @@ The `SessionEnd` hook only kills the daemon when **no `claude` process remains a
 |----------|-----|-----|
 | Windows | `%TEMP%\claude-voice.log` | `%TEMP%\claude-voice.pid` |
 | macOS | `$TMPDIR/claude-voice.log` | `$TMPDIR/claude-voice.pid` |
-| Linux | `/tmp/claude-voice.log` (or `$TMPDIR`) | `/tmp/claude-voice.pid` |
+| Linux | `/tmp/claude-voice.log` | `/tmp/claude-voice.pid` |
+
+## Manually starting / restarting the daemon
+
+If the daemon isn't running (e.g. after an uninstall/reinstall cycle in the same session, or after a crash), start it manually:
+
+```bash
+# Windows
+powershell -ExecutionPolicy Bypass -File scripts\start-voice.ps1
+
+# macOS / Linux
+bash scripts/start-voice.sh
+```
+
+To force-restart:
+
+```bash
+# Windows
+powershell -ExecutionPolicy Bypass -File scripts\stop-voice.ps1 -Force
+powershell -ExecutionPolicy Bypass -File scripts\start-voice.ps1
+
+# macOS / Linux
+bash scripts/stop-voice.sh --force
+bash scripts/start-voice.sh
+```
+
+## VS Code notes
+
+Voice works in VS Code's integrated terminal. Two things to know:
+
+1. **Built-in voice conflict.** Claude Code's extension has its own English-only voice on the same hotkey. `install.ps1` / `install.sh` automatically disables it (`voiceEnabled: false`) to avoid garbled output.
+
+2. **Paste target.** VS Code has multiple panels. Ctrl+V goes to whichever panel has cursor focus — if the cursor is in the code editor, the transcription lands there instead of the terminal. **Click the terminal panel before speaking** to ensure correct delivery.
 
 ## Troubleshooting
 
-- **No beep / no action on hotkey.** Focus detection didn't match. Check `claude-voice.log` for a recent `● 錄音中...` line; if absent, the foreground window's process tree doesn't contain a `claude.exe` / `claude` / `node ... claude` process. Verify with `tasklist` (Windows), `ps -ef | grep claude` (Unix).
-- **macOS / Linux: nothing happens on F9.** macOS: approve under System Settings → Privacy & Security → Accessibility. Linux: install `xdotool`; Wayland needs XWayland.
-- **Empty transcription.** VAD dropped the clip — speak for at least ~500 ms.
-- **Windows: Space also types nothing outside Claude Code.** Restart via `scripts\stop-voice.ps1 -Force` then `scripts\start-voice.ps1`.
+- **Hotkey doesn't trigger.** Check `claude-voice.log` for `● 錄音中...`. If absent, focus detection didn't match. Verify a `claude` process is running (`tasklist` / `ps -ef | grep claude`). Try manually restarting the daemon (see above).
+- **macOS: Cmd doesn't work.** Grant Accessibility permission: System Settings → Privacy & Security → Accessibility → add your terminal app.
+- **Empty transcription.** Speak for at least ~0.5s; VAD filters very short clips.
+- **Windows: Space stuck.** Force-restart the daemon (see above).
+
+> **Note:** Multi-tab terminals (Windows Terminal, VS Code, Terminal.app, iTerm2) share a single process. Voice detection applies to the entire terminal app, not individual tabs — if one tab runs Claude, all tabs in that window can trigger voice. This rarely matters in practice.

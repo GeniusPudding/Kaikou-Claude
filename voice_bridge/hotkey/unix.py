@@ -1,9 +1,12 @@
-"""macOS / Linux hotkey loops via pynput.
+"""macOS / Linux hotkey loop — instant Cmd/F9 hold-to-talk.
 
-macOS — Cmd (hold alone ≥ threshold):
-    Hold Cmd without pressing any other key to record. If another key is
-    pressed while Cmd is held the recording is cancelled (it was a shortcut
-    like Cmd+C). Short Cmd tap does nothing.
+macOS — Cmd (instant):
+    1. Press Cmd → start recording immediately (if Claude is focused).
+    2. During hold: if any other key is pressed (Cmd+C, Cmd+Tab, etc.)
+       or focus is lost → mark as "cancelled".
+    3. Release Cmd: if cancelled or held < 0.1s → discard recording.
+       Otherwise → stop, transcribe, paste, submit.
+    F9 also works as a backup hotkey.
 
 Linux — F9 (hold):
     Simple hold-to-talk. No conflict with typing.
@@ -13,118 +16,74 @@ Accessibility permission on macOS, and an X11 session on Linux.
 """
 
 import threading
+import time
 
 from pynput import keyboard as kb
 
 from .. import audio, config
 from ..focus import is_claude_code_focused
 
-# ---------------------------------------------------------------------------
-# macOS: Cmd hold-to-talk (with shortcut cancellation)
-# ---------------------------------------------------------------------------
-if config.IS_MAC:
-    _CMD_KEYS = {kb.Key.cmd, kb.Key.cmd_l, kb.Key.cmd_r}
+_CMD_KEYS = {kb.Key.cmd, kb.Key.cmd_l, kb.Key.cmd_r}
+_TRIGGER_KEYS = _CMD_KEYS | {kb.Key.f9}
 
-    _state = {
-        "state": "idle",   # idle | waiting | recording
-        "timer": None,
-        "busy": False,     # True while paste is in progress (ignore own keystrokes)
-    }
-    _lock = threading.Lock()
+_state = {
+    "mode": "idle",        # idle | recording
+    "busy": False,         # True while paste in progress
+    "cancelled": False,
+    "start_time": 0.0,
+}
+_lock = threading.Lock()
 
-    def _upgrade_to_recording():
+
+def _check_focus_loop():
+    """Background thread: cancel recording if focus leaves Claude."""
+    while True:
         with _lock:
-            if _state["state"] != "waiting":
-                return
-            _state["state"] = "recording"
-        threading.Thread(target=audio.start_recording, daemon=True).start()
-
-    def _on_press(key):
-        with _lock:
-            if _state["busy"]:
-                return
-            state = _state["state"]
-
-        if key in _CMD_KEYS:
-            with _lock:
-                if _state["state"] != "idle":
-                    return
-                if not is_claude_code_focused():
-                    return
-                _state["state"] = "waiting"
-                t = threading.Timer(config.HOLD_THRESHOLD_SEC, _upgrade_to_recording)
-                _state["timer"] = t
-                t.start()
-            return
-
-        # Any non-Cmd key while waiting/recording → cancel (user is doing a shortcut)
-        if state in ("waiting", "recording"):
-            with _lock:
-                if _state["timer"]:
-                    _state["timer"].cancel()
-                    _state["timer"] = None
-                was_recording = (_state["state"] == "recording")
-                _state["state"] = "idle"
-            if was_recording:
-                # Discard partial recording silently
-                threading.Thread(target=audio.stop_and_submit, daemon=True).start()
-
-    def _on_release(key):
-        if key not in _CMD_KEYS:
-            return
-        with _lock:
-            if _state["busy"]:
-                return
-            state = _state["state"]
-            if state == "waiting":
-                if _state["timer"]:
-                    _state["timer"].cancel()
-                    _state["timer"] = None
-                _state["state"] = "idle"
-                return
-            if state == "recording":
-                _state["state"] = "idle"
-                _state["busy"] = True
-
-        if state == "recording":
-            def _finish():
-                try:
-                    audio.stop_and_submit()
-                finally:
-                    with _lock:
-                        _state["busy"] = False
-            threading.Thread(target=_finish, daemon=True).start()
-
-    def run_loop():
-        print("✓ pynput keyboard listener 已安裝(Cmd hold-to-talk)", flush=True)
-        with kb.Listener(on_press=_on_press, on_release=_on_release) as listener:
-            listener.join()
-
-# ---------------------------------------------------------------------------
-# Linux: F9 hold-to-talk
-# ---------------------------------------------------------------------------
-else:
-    _state = {"down": False, "busy": False}
-    _lock = threading.Lock()
-
-    def _on_press(key):
-        if key != kb.Key.f9:
-            return
-        with _lock:
-            if _state["down"] or _state["busy"]:
-                return
+            if _state["mode"] != "recording":
+                break
             if not is_claude_code_focused():
-                return
-            _state["down"] = True
-        threading.Thread(target=audio.start_recording, daemon=True).start()
+                _state["cancelled"] = True
+                print("��� 焦點遺失，錄音已作廢", flush=True)
+                break
+        time.sleep(0.05)
 
-    def _on_release(key):
-        if key != kb.Key.f9:
+
+def _on_press(key):
+    with _lock:
+        # During recording: any non-trigger key → cancel (it's a shortcut)
+        if _state["mode"] == "recording" and key not in _TRIGGER_KEYS:
+            _state["cancelled"] = True
+            return
+        if _state["mode"] != "idle" or _state["busy"]:
+            return
+
+    if key in _TRIGGER_KEYS:
+        if not is_claude_code_focused():
             return
         with _lock:
-            if not _state["down"]:
-                return
-            _state["down"] = False
+            _state["mode"] = "recording"
+            _state["cancelled"] = False
+            _state["start_time"] = time.time()
+        audio.start_recording()
+        threading.Thread(target=_check_focus_loop, daemon=True).start()
+
+
+def _on_release(key):
+    if key not in _TRIGGER_KEYS:
+        return
+    with _lock:
+        if _state["mode"] != "recording":
+            return
+        was_cancelled = _state["cancelled"]
+        # Very short press (< 0.1s) = accidental tap, also discard
+        if time.time() - _state["start_time"] < 0.1:
+            was_cancelled = True
+        _state["mode"] = "idle"
+
+    if was_cancelled:
+        threading.Thread(target=audio.discard_recording, daemon=True).start()
+    else:
+        with _lock:
             _state["busy"] = True
 
         def _finish():
@@ -136,7 +95,11 @@ else:
 
         threading.Thread(target=_finish, daemon=True).start()
 
-    def run_loop():
-        print("✓ pynput keyboard listener 已安裝(F9 hold-to-talk)", flush=True)
-        with kb.Listener(on_press=_on_press, on_release=_on_release) as listener:
-            listener.join()
+
+def run_loop():
+    if config.IS_MAC:
+        print("✓ pynput listener 已安裝(Cmd / F9 hold-to-talk)", flush=True)
+    else:
+        print("✓ pynput listener 已安裝(F9 hold-to-talk)", flush=True)
+    with kb.Listener(on_press=_on_press, on_release=_on_release) as listener:
+        listener.join()

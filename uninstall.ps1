@@ -9,20 +9,20 @@ $patchScript   = Join-Path $repoDir 'scripts\patch_settings.py'
 $settingsFile  = Join-Path $HOME '.claude\settings.json'
 
 Write-Host ''
-Write-Host '=== Kaikou-Claude 解除安裝 ==='
+Write-Host '=== Kaikou-Claude uninstall ==='
 
 # 1. Stop any live daemon unconditionally (-Force bypasses session counter).
 if (Test-Path $stopScript) {
     & powershell -NoProfile -ExecutionPolicy Bypass -File $stopScript -Force | Out-Null
-    Write-Host 'daemon 已停止(若原本在跑)'
+    Write-Host 'Daemon stopped (if it was running)'
 }
 
 # 2. Remove our SessionStart/SessionEnd entries from settings.json.
 if ((Test-Path $venvPython) -and (Test-Path $patchScript) -and (Test-Path $settingsFile)) {
     & $venvPython $patchScript $settingsFile uninstall
 } else {
-    Write-Host 'venv 或 settings.json 不在,跳過 hook 清除'
+    Write-Host 'venv or settings.json not found; skipping hook removal'
 }
 
 Write-Host ''
-Write-Host '完成。repo 檔案保留,若要完全移除請自行刪除目錄。'
+Write-Host 'Done. Repo files kept on disk; delete the directory manually to fully remove.'

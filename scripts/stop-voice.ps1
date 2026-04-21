@@ -23,8 +23,9 @@ if ($Force) {
     exit 0
 }
 
-# If any claude process is still alive, keep daemon running.
-$alive = Get-Process -Name claude -ErrorAction SilentlyContinue
+# If any AI agent process is still alive, keep daemon running.
+# Whitelist of process names — keep in sync with _AI_TITLE_KEYWORDS in focus.py.
+$alive = Get-Process -Name claude,gemini,aider,codex -ErrorAction SilentlyContinue
 if ($alive) {
     Write-Host "$($alive.Count) claude process(es) still alive; daemon kept alive"
     exit 0

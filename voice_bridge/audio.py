@@ -91,17 +91,18 @@ def _paste_and_submit(text: str):
     except Exception:
         pass
     pyperclip.copy(payload)
-    time.sleep(0.05)
+    time.sleep(0.1)
     paste_modifier = kb.Key.cmd if config.IS_MAC else kb.Key.ctrl
     _kb_ctrl.press(paste_modifier)
     _kb_ctrl.press("v")
     _kb_ctrl.release("v")
     _kb_ctrl.release(paste_modifier)
-    time.sleep(0.12)
+    time.sleep(0.15)
     if config.AUTO_SUBMIT:
         _kb_ctrl.press(kb.Key.enter)
         _kb_ctrl.release(kb.Key.enter)
     time.sleep(0.25)
+    print("[paste] done", flush=True)
     try:
         pyperclip.copy(saved)
     except Exception:
@@ -146,6 +147,20 @@ def stop_and_submit():
     print(f"→ {text}", flush=True)
     _paste_and_submit(text)
     _beep(1200, 70)
+
+
+def discard_recording():
+    """Stop the active recording and throw away the audio (no transcription)."""
+    with _lock:
+        if not _state["recording"]:
+            return
+        _state["recording"] = False
+        stream = _state["stream"]
+        _state["stream"] = None
+    if stream is not None:
+        stream.stop()
+        stream.close()
+    print("⏹ 錄音已作廢", flush=True)
 
 
 def inject_key(key):

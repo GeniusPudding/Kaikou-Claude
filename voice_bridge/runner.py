@@ -27,12 +27,13 @@ def _print_hotkey_help():
     if config.IS_WIN:
         print(f"  Space(按住 ≥{config.HOLD_THRESHOLD_SEC}s)→ 中文語音,短按則當普通空白")
     elif config.IS_MAC:
-        print(f"  Cmd(單獨按住 ≥{config.HOLD_THRESHOLD_SEC}s)→ 中文語音")
-        print("  (Cmd+其他鍵 = 正常快捷鍵,不會觸發語音。需授予 Accessibility 權限。)")
+        print("  Cmd(按住)→ 中文語音(即時錄音,Cmd+其他鍵自動取消)")
+        print("  F9(按住)→ 中文語音(備用)")
+        print("  (需授予 Accessibility 權限。)")
     else:
         print("  F9(按住)→ 中文語音")
         print("  (Linux 需 X11 + xdotool。)")
-    print("CC 焦點偵測:前景視窗 process tree 內有 claude / node claude cli")
+    print("CC 焦點偵測:前景視窗 process tree 內有 claude 相關進程")
     print(f"語音標記後綴:{config.VOICE_MARKER!r}")
     print("Ctrl+C 離開\n", flush=True)
 
