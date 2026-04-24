@@ -190,9 +190,12 @@ bash scripts/start-voice.sh
 
 ## 常見問題
 
+- **Daemon 沒在跑。** Daemon 靠 `SessionStart` hook 在你開啟 Claude/Gemini session 時自動啟動。若沒啟動（權限被拒、venv 損壞、腳本錯誤），請手動重啟（見[手動啟動 / 重啟 daemon](#手動啟動--重啟-daemon)）。若持續發生，重跑 `./install.ps1` 或 `./install.sh` 以修復 venv 並重新註冊 hook。
 - **熱鍵沒反應。** 看 `claude-voice.log` 有沒有 `● 錄音中...`。沒有 = 焦點偵測沒命中或 daemon 沒在跑。確認 `claude` process 存在,若 daemon 不在就手動啟動（見上方）。
 - **macOS：Cmd 沒反應。** 去「系統設定 → 隱私權與安全性 → 輔助使用」把你的終端機加進去。
 - **轉錄為空。** 講久一點(≥ 0.5 秒),VAD 會過濾太短的音訊。
 - **Windows：空白鍵卡住。** 強制重啟 daemon（見上方）。
 
 > **附註：** 多 tab 終端機（Windows Terminal、VS Code、Terminal.app、iTerm2）共用同一個 process,語音偵測作用於整個終端 app 而非個別 tab。只要其中一個 tab 有跑 AI agent,同視窗的所有 tab 都能觸發語音。實際使用上幾乎不受影響。
+>
+> **Daemon 生命週期：** Daemon 靠 `SessionStart` hook 在你開 Claude session 時啟動,靠 `SessionEnd` hook 在所有 Claude process 結束時停止。這是設計使然——防止背景 process 堆積。若你在一個 Claude 視窗還開著時又開了新的,daemon 會持續執行,語音功能無縫接續運作。

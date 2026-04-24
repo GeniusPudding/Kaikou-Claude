@@ -31,10 +31,20 @@ if [[ $force -eq 1 ]]; then
 fi
 
 # If any AI agent process is still alive, keep daemon running.
+# Also check for SSH/remote sessions in case agent is running on remote machine.
 # Whitelist — keep in sync with _AI_TITLE_KEYWORDS in focus.py.
-agent_count=$(pgrep -c -f 'claude|gemini|aider|codex' 2>/dev/null || echo 0)
-if (( agent_count > 0 )); then
-    echo "$agent_count AI agent process(es) still alive; daemon kept alive"
+
+# Check local agent processes
+agent_count=$(ps aux | grep -iE 'claude|gemini|aider|codex' | grep -v grep | grep -v voice_to_claude | wc -l)
+
+# Check for active SSH sessions (user may be connected to remote with agent running)
+ssh_count=$(ps aux | grep -E '\bssh\b.*-' | grep -v grep | wc -l)
+
+if (( agent_count > 0 || ssh_count > 0 )); then
+    msg="daemon kept alive"
+    [[ $agent_count -gt 0 ]] && msg="$agent_count local AI agent(s) + $msg"
+    [[ $ssh_count -gt 0 ]] && msg="$msg (+ $ssh_count SSH session(s))"
+    echo "$msg"
     exit 0
 fi
 

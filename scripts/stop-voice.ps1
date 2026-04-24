@@ -24,10 +24,21 @@ if ($Force) {
 }
 
 # If any AI agent process is still alive, keep daemon running.
+# Also check for SSH/remote sessions in case agent is running on remote machine.
 # Whitelist of process names — keep in sync with _AI_TITLE_KEYWORDS in focus.py.
-$alive = Get-Process -Name claude,gemini,aider,codex -ErrorAction SilentlyContinue
-if ($alive) {
-    Write-Host "$($alive.Count) claude process(es) still alive; daemon kept alive"
+$alive = @(Get-Process -Name claude -ErrorAction SilentlyContinue) +
+         @(Get-Process -Name gemini -ErrorAction SilentlyContinue) +
+         @(Get-Process -Name aider -ErrorAction SilentlyContinue) +
+         @(Get-Process -Name codex -ErrorAction SilentlyContinue)
+$alive = $alive | Where-Object { $_ -ne $null }
+
+$sshConnections = @(Get-Process -Name ssh -ErrorAction SilentlyContinue)
+
+if ($alive.Count -gt 0 -or $sshConnections.Count -gt 0) {
+    $msg = "daemon kept alive"
+    if ($alive.Count -gt 0) { $msg = "$($alive.Count) local AI agent(s) + $msg" }
+    if ($sshConnections.Count -gt 0) { $msg = "$msg (+ $($sshConnections.Count) SSH session(s))" }
+    Write-Host $msg
     exit 0
 }
 

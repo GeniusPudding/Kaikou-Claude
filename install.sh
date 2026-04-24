@@ -43,18 +43,8 @@ if (( py_ver_num < 309 )); then
     exit 1
 fi
 
-# 3. venv.
-if [[ ! -x "$venv_python" ]]; then
-    echo "建立 venv..."
-    "$python_cmd" -m venv "$venv_dir"
-else
-    echo "venv 已存在,跳過"
-fi
-
-# 4. Dependencies.
-echo "安裝依賴(首次會花幾十秒)..."
-"$venv_python" -m pip install --upgrade pip >/dev/null
-"$venv_python" -m pip install -r "$requirements"
+# Note: venv creation and dependency installation are handled by start-voice.sh
+# (it auto-initializes if needed). We only ensure Python exists here.
 
 # 5. Linux focus detection falls back to xdotool; warn if missing.
 if [[ "$uname_s" == "Linux" ]]; then
@@ -90,9 +80,15 @@ chmod +x "$repo_dir/scripts/start-voice.sh" "$repo_dir/scripts/stop-voice.sh" 2>
 mkdir -p "$(dirname "$settings_file")"
 "$venv_python" "$patch_script" "$settings_file" install unix "$repo_dir"
 
-# 8. Pre-download Whisper model (auto-detect GPU -> pick model size).
-echo "下載 Whisper 模型(首次需要,之後從快取讀取)..."
-"$venv_python" -c "
+# 8. Initialize venv and dependencies via start-voice.sh (if not already done).
+bash "$repo_dir/scripts/start-voice.sh" >/dev/null 2>&1
+
+# 9. Pre-download Whisper model (optional, speeds up first use).
+# start-voice.sh ensures venv exists, so we can safely use it.
+venv_python="$repo_dir/.venv/bin/python"
+if [[ -x "$venv_python" ]]; then
+    echo "下載 Whisper 模型(首次需要,之後從快取讀取)..."
+    "$venv_python" -c "
 import ctranslate2
 from faster_whisper import WhisperModel
 device = 'cuda' if ctranslate2.get_cuda_device_count() > 0 else 'cpu'
@@ -101,14 +97,30 @@ model_size = 'medium' if device == 'cuda' else 'small'
 print(f'  {model_size} ({device}, {compute})')
 WhisperModel(model_size, device=device, compute_type=compute)
 print('  done')
-" || echo "Model download failed (non-fatal; will retry on first launch)"
+" || echo "Model download failed (non-fatal; will retry on daemon startup)"
+fi
 
-# 9. If an AI session is already running, start daemon now.
+# 10. If an AI session or SSH connection is already active, start daemon now.
 # Whitelist — keep in sync with _AI_TITLE_KEYWORDS in focus.py.
-if pgrep -f 'claude|gemini|aider|codex' >/dev/null 2>&1; then
-    echo "Detected running AI session; starting daemon now..."
+if ps aux | grep -iE 'claude|gemini|aider|codex' | grep -v grep | grep -v voice_to_claude >/dev/null 2>&1 || \
+   ps aux | grep -E '\bssh\b.*-' | grep -v grep >/dev/null 2>&1; then
+    echo "已偵測到執行中的 AI session 或 SSH 連線; 立即啟動 daemon..."
     bash "$repo_dir/scripts/start-voice.sh" >/dev/null 2>&1
 fi
+
+# 11. Add daemon auto-start to shell config (for non-Claude terminals).
+for shell_rc in ~/.bashrc ~/.zshrc; do
+    if [[ -f "$shell_rc" ]]; then
+        if ! grep -q "Kaikou-Claude daemon auto-start" "$shell_rc"; then
+            cat >> "$shell_rc" <<'SHELL_CONFIG'
+
+# Kaikou-Claude daemon auto-start (any terminal, including SSH)
+bash '"$repo_dir"'/scripts/start-voice.sh >/dev/null 2>&1 &
+SHELL_CONFIG
+            echo "已添加 daemon auto-start 到 $shell_rc"
+        fi
+    fi
+done
 
 echo
 echo "=== Done ==="

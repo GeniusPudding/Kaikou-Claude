@@ -29,8 +29,35 @@ if [[ -f "$pid_file" ]]; then
 fi
 
 if [[ ! -x "$python_bin" ]]; then
-    echo '{"systemMessage":"[kaikou-claude] venv not found. Run install.sh first."}'
-    exit 1
+    echo "venv not found; attempting to initialize..." >&2
+
+    # Try to find a system Python 3
+    python_cmd=""
+    for candidate in python3 python; do
+        if command -v "$candidate" >/dev/null 2>&1; then
+            python_cmd="$candidate"
+            break
+        fi
+    done
+
+    if [[ -z "$python_cmd" ]]; then
+        echo '{"systemMessage":"[kaikou-claude] Python not found. Please install Python 3.9+ or run install.sh."}'
+        exit 1
+    fi
+
+    # Quick venv setup
+    echo "Creating venv..." >&2
+    "$python_cmd" -m venv "$voice_dir/.venv" 2>/dev/null || {
+        echo '{"systemMessage":"[kaikou-claude] Failed to create venv. Run install.sh to set up properly."}'
+        exit 1
+    }
+
+    echo "Installing dependencies..." >&2
+    "$python_bin" -m pip install --upgrade pip -q >/dev/null 2>&1
+    "$python_bin" -m pip install -r "$voice_dir/requirements.txt" -q >/dev/null 2>&1 || {
+        echo '{"systemMessage":"[kaikou-claude] Dependency installation failed. Run install.sh to fix."}'
+        exit 1
+    }
 fi
 
 nohup "$python_bin" "$script" >>"$log_file" 2>&1 &

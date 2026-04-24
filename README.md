@@ -190,9 +190,12 @@ Voice works in VS Code's integrated terminal. Two things to know:
 
 ## Troubleshooting
 
+- **Daemon isn't running.** The daemon auto-starts with `SessionStart` hook when you open a Claude/Gemini session. If it doesn't (permissions denied, venv broken, script error), manually restart it (see [Manually starting / restarting the daemon](#manually-starting--restarting-the-daemon) above). If this keeps happening, re-run `./install.ps1` or `./install.sh` to repair the venv and re-register hooks.
 - **Hotkey doesn't trigger.** Check `claude-voice.log` for `● 錄音中...`. If absent, focus detection didn't match. Verify a `claude` process is running (`tasklist` / `ps -ef | grep claude`). Try manually restarting the daemon (see above).
 - **macOS: Cmd doesn't work.** Grant Accessibility permission: System Settings → Privacy & Security → Accessibility → add your terminal app.
 - **Empty transcription.** Speak for at least ~0.5s; VAD filters very short clips.
 - **Windows: Space stuck.** Force-restart the daemon (see above).
 
 > **Note:** Multi-tab terminals (Windows Terminal, VS Code, Terminal.app, iTerm2) share a single process. Voice detection applies to the entire terminal app, not individual tabs — if one tab runs Claude, all tabs in that window can trigger voice. This rarely matters in practice.
+>
+> **Daemon lifecycle:** The daemon is started by `SessionStart` hook when you open a Claude session and stopped by `SessionEnd` hook when all Claude processes exit. This is by design — it prevents background accumulation. If you open a new Claude window while another is still open, the daemon remains running and continues working seamlessly.

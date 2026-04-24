@@ -20,11 +20,36 @@ if [[ -f "$stop_script" ]]; then
 fi
 
 # 2. Remove our SessionStart / SessionEnd entries.
-if [[ -x "$venv_python" && -f "$patch_script" && -f "$settings_file" ]]; then
-    "$venv_python" "$patch_script" "$settings_file" uninstall
+if [[ -f "$patch_script" && -f "$settings_file" ]]; then
+    # Try venv Python first, fallback to system Python if venv doesn't exist.
+    python_cmd="$venv_python"
+    if [[ ! -x "$python_cmd" ]]; then
+        for candidate in python3 python; do
+            if command -v "$candidate" >/dev/null 2>&1; then
+                python_cmd="$candidate"
+                break
+            fi
+        done
+    fi
+
+    if [[ -x "$python_cmd" ]] || command -v "$python_cmd" >/dev/null 2>&1; then
+        "$python_cmd" "$patch_script" "$settings_file" uninstall
+    else
+        echo "Python 找不到,跳過 hook 清除"
+    fi
 else
-    echo "venv 或 settings.json 不在,跳過 hook 清除"
+    echo "patch_settings.py 或 settings.json 不在,跳過 hook 清除"
 fi
+
+# 3. Remove daemon auto-start from shell configs.
+for shell_rc in ~/.bashrc ~/.zshrc; do
+    if [[ -f "$shell_rc" ]]; then
+        # Remove the Kaikou-Claude section (sed works on both GNU and BSD)
+        sed -i.bak '/# Kaikou-Claude daemon auto-start/,/^$/d' "$shell_rc" 2>/dev/null || \
+        sed -i '' '/# Kaikou-Claude daemon auto-start/,/^$/d' "$shell_rc" 2>/dev/null
+        echo "已從 $shell_rc 移除 daemon auto-start"
+    fi
+done
 
 echo
 echo "完成。repo 檔案保留,若要徹底移除請自行刪除目錄。"
