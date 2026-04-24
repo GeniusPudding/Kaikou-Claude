@@ -49,9 +49,10 @@ if (-not (Test-Path $pythonw)) {
     }
 
     Write-Error "Installing dependencies..." -ErrorAction Continue
+    $venvPython = Join-Path $voiceDir '.venv\Scripts\python.exe'
     try {
-        & $pythonw -m pip install --upgrade pip -q 2>$null
-        & $pythonw -m pip install -r "$voiceDir\requirements.txt" -q 2>$null
+        & $venvPython -m pip install --upgrade pip -q 2>$null
+        & $venvPython -m pip install -r "$voiceDir\requirements.txt" -q 2>$null
     } catch {
         Write-Output '{"systemMessage":"[kaikou-claude] Dependency installation failed. Run install.ps1 to fix."}'
         exit 1
