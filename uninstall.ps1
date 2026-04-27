@@ -47,10 +47,10 @@ if ((Test-Path $patchScript) -and (Test-Path $settingsFile)) {
 # 3. Remove daemon auto-start from PowerShell profile.
 $profilePath = $PROFILE.CurrentUserCurrentHost
 if ($profilePath -and (Test-Path $profilePath)) {
-    $content = Get-Content $profilePath -Raw
-    $newContent = $content -replace "# Kaikou-Claude daemon auto-start.*?&`n", ""
-    if ($newContent -ne $content) {
-        Set-Content -Path $profilePath -Value $newContent
+    $lines = Get-Content $profilePath -ErrorAction SilentlyContinue
+    $filtered = $lines | Where-Object { $_ -notmatch 'Kaikou-Claude' -and $_ -notmatch 'start-voice\.ps1' }
+    if ($filtered.Count -lt $lines.Count) {
+        Set-Content -Path $profilePath -Value $filtered
         Write-Host 'Removed daemon auto-start from PowerShell profile'
     }
 }

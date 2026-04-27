@@ -115,15 +115,18 @@ $profilePath = $PROFILE.CurrentUserCurrentHost
 if ($profilePath) {
     $profileDir = Split-Path -Parent $profilePath
     if (-not (Test-Path $profileDir)) { New-Item -ItemType Directory -Path $profileDir | Out-Null }
-
-    if (-not (Test-Path $profilePath)) {
-        $null > $profilePath
-    }
+    if (-not (Test-Path $profilePath)) { New-Item -ItemType File -Path $profilePath | Out-Null }
 
     $profileContent = Get-Content $profilePath -Raw -ErrorAction SilentlyContinue
-    if ($profileContent -notlike '*Kaikou-Claude daemon auto-start*') {
-        "`n# Kaikou-Claude daemon auto-start (any terminal, including SSH)`npowershell -NoProfile -ExecutionPolicy Bypass -File '$repoDir\scripts\start-voice.ps1' 2>$null | Out-Null &`n" | Add-Content -Path $profilePath
-        Write-Host "Added daemon auto-start to PowerShell profile"
+    if (-not $profileContent -or $profileContent -notlike '*Kaikou-Claude*') {
+        $startScript = Join-Path $repoDir 'scripts\start-voice.ps1'
+        $autoStartLine = @"
+
+# Kaikou-Claude daemon auto-start (any terminal, including SSH)
+Start-Process -WindowStyle Hidden -FilePath powershell -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File "$startScript"'
+"@
+        Add-Content -Path $profilePath -Value $autoStartLine
+        Write-Host "Added daemon auto-start to PowerShell profile: $profilePath"
     }
 }
 
