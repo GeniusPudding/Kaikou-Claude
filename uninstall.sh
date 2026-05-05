@@ -41,13 +41,18 @@ else
     echo "patch_settings.py 或 settings.json 不在,跳過 hook 清除"
 fi
 
-# 3. Remove daemon auto-start from shell configs.
+# 3. Remove Kaikou-Claude blocks from shell configs (preexec hook + any
+# legacy auto-start entries).
 for shell_rc in ~/.bashrc ~/.zshrc; do
     if [[ -f "$shell_rc" ]]; then
-        # Remove the Kaikou-Claude section (sed works on both GNU and BSD)
-        sed -i.bak '/# Kaikou-Claude daemon auto-start/,/^$/d' "$shell_rc" 2>/dev/null || \
-        sed -i '' '/# Kaikou-Claude daemon auto-start/,/^$/d' "$shell_rc" 2>/dev/null
-        echo "已從 $shell_rc 移除 daemon auto-start"
+        # Try GNU sed (-i requires arg), fall back to BSD sed (-i '').
+        # The block extends from the marker to the next blank line.
+        for marker in 'Kaikou-Claude daemon preexec' 'Kaikou-Claude daemon auto-start'; do
+            sed -i.bak "/# $marker/,/^$/d" "$shell_rc" 2>/dev/null || \
+            sed -i '' "/# $marker/,/^$/d" "$shell_rc" 2>/dev/null
+        done
+        rm -f "${shell_rc}.bak" 2>/dev/null
+        echo "已從 $shell_rc 移除 Kaikou-Claude 區塊"
     fi
 done
 

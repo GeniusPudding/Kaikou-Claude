@@ -110,7 +110,8 @@ if ($aliveAgent.Count -gt 0 -or $sshConnections.Count -gt 0) {
     & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repoDir 'scripts\start-voice.ps1') 2>$null | Out-Null
 }
 
-# 8. Add daemon auto-start to PowerShell profile (for non-Claude terminals).
+# 8. Add preexec hook to PowerShell profile: PSReadLine Enter handler that
+#    starts daemon only when the user runs an AI agent or ssh.
 $profilePath = $PROFILE.CurrentUserCurrentHost
 if ($profilePath) {
     $profileDir = Split-Path -Parent $profilePath
@@ -120,13 +121,25 @@ if ($profilePath) {
     $profileContent = Get-Content $profilePath -Raw -ErrorAction SilentlyContinue
     if (-not $profileContent -or $profileContent -notlike '*Kaikou-Claude*') {
         $startScript = Join-Path $repoDir 'scripts\start-voice.ps1'
-        $autoStartLine = @"
+        # Backticks escape vars so they remain literal in the profile and only
+        # get expanded when the handler fires inside a new PowerShell session.
+        # $startScript is interpolated NOW so the absolute path is baked in.
+        $hookBlock = @"
 
-# Kaikou-Claude daemon auto-start (any terminal, including SSH)
-Start-Process -WindowStyle Hidden -FilePath powershell -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File "$startScript"'
+# Kaikou-Claude daemon preexec (PSReadLine Enter handler)
+if (Get-Module -ListAvailable -Name PSReadLine) {
+    Set-PSReadLineKeyHandler -Key Enter -ScriptBlock {
+        `$line = `$null; `$cursor = `$null
+        [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]`$line, [ref]`$cursor)
+        if (`$line -match '^\s*(claude|gemini|aider|codex|ssh)\b') {
+            Start-Process -WindowStyle Hidden -FilePath powershell -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File "$startScript"'
+        }
+        [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
+    }
+}
 "@
-        Add-Content -Path $profilePath -Value $autoStartLine
-        Write-Host "Added daemon auto-start to PowerShell profile: $profilePath"
+        Add-Content -Path $profilePath -Value $hookBlock
+        Write-Host "Added preexec hook to PowerShell profile: $profilePath"
     }
 }
 

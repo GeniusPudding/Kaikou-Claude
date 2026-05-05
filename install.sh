@@ -108,19 +108,47 @@ if ps aux | grep -iE 'claude|gemini|aider|codex' | grep -v grep | grep -v voice_
     bash "$repo_dir/scripts/start-voice.sh" >/dev/null 2>&1
 fi
 
-# 11. Add daemon auto-start to shell config (for non-Claude terminals).
-for shell_rc in ~/.bashrc ~/.zshrc; do
-    if [[ -f "$shell_rc" ]]; then
-        if ! grep -q "Kaikou-Claude daemon auto-start" "$shell_rc"; then
-            cat >> "$shell_rc" <<'SHELL_CONFIG'
+# 11. Add preexec hook to shell config: only start daemon when user actually
+#     runs an AI agent or ssh, not on every terminal open.
 
-# Kaikou-Claude daemon auto-start (any terminal, including SSH)
-bash '"$repo_dir"'/scripts/start-voice.sh >/dev/null 2>&1 &
-SHELL_CONFIG
-            echo "已添加 daemon auto-start 到 $shell_rc"
-        fi
+# zsh: native preexec_functions array.
+if [[ -f ~/.zshrc ]]; then
+    if ! grep -q "Kaikou-Claude daemon preexec" ~/.zshrc; then
+        cat >> ~/.zshrc <<EOF
+
+# Kaikou-Claude daemon preexec (zsh)
+_kaikou_preexec() {
+    case "\$1" in
+        claude*|gemini*|aider*|codex*|ssh*)
+            bash '$repo_dir/scripts/start-voice.sh' >/dev/null 2>&1 &
+            ;;
+    esac
+}
+typeset -ga preexec_functions
+preexec_functions+=(_kaikou_preexec)
+EOF
+        echo "已添加 preexec hook 到 ~/.zshrc"
     fi
-done
+fi
+
+# bash: DEBUG trap as preexec equivalent.
+if [[ -f ~/.bashrc ]]; then
+    if ! grep -q "Kaikou-Claude daemon preexec" ~/.bashrc; then
+        cat >> ~/.bashrc <<EOF
+
+# Kaikou-Claude daemon preexec (bash)
+_kaikou_preexec() {
+    case "\$BASH_COMMAND" in
+        claude*|gemini*|aider*|codex*|ssh\\ *)
+            bash '$repo_dir/scripts/start-voice.sh' >/dev/null 2>&1 &
+            ;;
+    esac
+}
+trap '_kaikou_preexec' DEBUG
+EOF
+        echo "已添加 preexec hook 到 ~/.bashrc"
+    fi
+fi
 
 echo
 echo "=== Done ==="
