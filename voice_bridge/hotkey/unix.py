@@ -24,7 +24,12 @@ from .. import audio, config
 from ..focus import is_claude_code_focused
 
 _CMD_KEYS = {kb.Key.cmd, kb.Key.cmd_l, kb.Key.cmd_r}
-_TRIGGER_KEYS = _CMD_KEYS | {kb.Key.f9}
+# macOS: Cmd only (Cmd is rarely pressed alone, no conflict with typing).
+# Linux: F9 (Cmd doesn't exist on standard Linux keyboards).
+if config.IS_MAC:
+    _TRIGGER_KEYS = _CMD_KEYS
+else:
+    _TRIGGER_KEYS = {kb.Key.f9}
 
 _state = {
     "mode": "idle",        # idle | recording

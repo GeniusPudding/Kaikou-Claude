@@ -2,95 +2,44 @@
 
 # Kaikou-Claude（開口即克）
 
-本地離線中文語音輸入,支援各種 AI 程式助手。按住熱鍵講話、放開自動轉錄貼上送出。適用 Claude Code、Claude Desktop、Gemini Code Assist、SSH 遠端 agent 等任何在終端機中執行的 AI 工具。
+本地離線中文語音輸入給各種 AI 程式助手。按住熱鍵講話、放開自動轉錄貼上送出。
+
+支援 **Claude Code**（終端機、VS Code、SSH）、**Claude Desktop**、**Gemini Code Assist**、**Aider**、**Codex**，以及任何在終端機跑的 AI agent。
 
 底層使用 [faster-whisper](https://github.com/SYSTRAN/faster-whisper)。不需 API key,資料不離開你的電腦。
 
-## 支援目標
-
-語音在前景視窗是已知終端機（iTerm、Terminal.app、Warp、Windows Terminal）或 process tree / 視窗 title 含 `claude` 時觸發,涵蓋：
-
-- **Claude Code** — 終端機、VS Code 整合終端、SSH
-- **Claude Desktop** — Electron app
-- **Gemini Code Assist / 其他 AI agent** — 任何跑在終端機視窗裡的工具
-- **SSH 遠端 agent** — daemon 裝在本地,貼上動作送進 SSH session
-
 ## 平台支援
 
-| 平台 | 狀態 | 熱鍵 | 備註 |
-|------|------|------|------|
-| Windows | **穩定** | **空白鍵(按住)** | 短按 = 一般空白,長按 ≥ 250ms = 語音 |
-| macOS | **穩定** | **Cmd(按住)** | 即時錄音,Cmd+其他鍵自動取消。F9 備用。需「輔助使用」權限 |
+| 平台 | 熱鍵 | 備註 |
+|------|------|------|
+| Windows | **空白鍵（按住 ≥ 250ms）** | 短按 = 一般空白,長按 = 語音 |
+| macOS | **Cmd（按住）** | 即時錄音。Cmd+其他鍵 = 一般快捷鍵（自動取消語音）。需「輔助使用」權限 |
+| Linux | F9（按住） | 僅限 X11。建議安裝 `xdotool` |
 
-> **SSH / 遠端使用：** 安裝在你**鍵盤所在的那台機器**（本地 Mac 或 Windows），不是遠端 server。daemon 在本地攔截鍵盤並貼上——對任何 SSH 終端機透明運作。
->
-> **Linux 桌面（少見）：** 裝在本地,熱鍵是 F9。需 X11 + `xdotool`。
-
-## 運作原理
-
-```
-┌──────────────────────────────────────────────────────────┐
-│  你打開 Claude Code session（或任何支援的工具）             │
-│    → SessionStart hook 在背景啟動 daemon                  │
-│    → 載入 Whisper 模型（自動偵測 CUDA）                    │
-│    → 安裝鍵盤 hook                                       │
-└──────────────────────────────────────────────────────────┘
-                        ↓
-┌──────────────────────────────────────────────────────────┐
-│  你按住熱鍵                                              │
-│    → 焦點檢查:前景是支援的目標嗎？                         │
-│      • Windows: Win32 GetForegroundWindow + process tree  │
-│      • macOS: NSWorkspace + Quartz 視窗 title + tree      │
-│      • Linux: xdotool + process tree                      │
-│    → 是 → 透過 sounddevice 開始錄音                       │
-└──────────────────────────────────────────────────────────┘
-                        ↓
-┌──────────────────────────────────────────────────────────┐
-│  你放開按鍵                                              │
-│    → faster-whisper 在本地轉錄                            │
-│    → 文字複製到剪貼簿                                     │
-│    → Ctrl+V (macOS Cmd+V) 貼到焦點視窗                    │
-│    → Enter 送出（若 VOICE_AUTO_SUBMIT=1）                 │
-└──────────────────────────────────────────────────────────┘
-                        ↓
-┌──────────────────────────────────────────────────────────┐
-│  你關閉所有 Claude session                                │
-│    → SessionEnd hook 檢查有無殘存 claude process           │
-│    → 都沒了才殺 daemon                                    │
-└──────────────────────────────────────────────────────────┘
-```
-
-全程本地運行 — 不需網路、不需 API key、資料不離開你的電腦。
-
-## 特色
-
-- **情境感知。** 熱鍵只在支援的 AI 工具有焦點時生效,其他地方透明。
-- **自動貼上送出。** 轉錄經剪貼簿貼入,按 Enter 送出。
-- **語音標記。** 轉錄加上 `<voice>` 後綴,Claude Code 會自動容錯 ASR 瑕疵（見[語音標記](#語音標記)）。
-- **自動選 CUDA。** 偵測不到 GPU 時回退 CPU `int8`。
-- **Daemon 生命週期。** 只要有 `claude` process 存在就不死;全部關了才自動停。
+> **SSH / 遠端使用：** 安裝在你**鍵盤所在的那台機器**（本地 Mac 或 Windows）。daemon 在本地攔截鍵盤並貼上 — 對任何連到遠端主機的終端機透明運作。
 
 ## 安裝
-
-### Windows
-
-```powershell
-git clone https://github.com/GeniusPudding/Kaikou-Claude.git
-cd Kaikou-Claude
-.\install.ps1
-```
-
-### macOS / Linux
 
 ```bash
 git clone https://github.com/GeniusPudding/Kaikou-Claude.git
 cd Kaikou-Claude
+
+# Windows
+.\install.ps1
+
+# macOS / Linux
 ./install.sh
 ```
 
-安裝腳本會建 `.venv`、安裝依賴、寫 `.env`(若不存在)、把 hook 合併到 `~/.claude/settings.json`。冪等 — 隨時重跑都安全。
+安裝腳本會：
 
-首次 session 後會下載 Whisper 模型（`small` 約 500 MB,`medium` 約 1.5 GB）。
+1. 建 `.venv` 並安裝 Python 依賴。
+2. 寫一份預設 `.env`（若不存在）。
+3. 把 `SessionStart` / `SessionEnd` hook 註冊到 `~/.claude/settings.json`。
+4. 在你的 shell 設定（`~/.bashrc` / `~/.zshrc` / PowerShell `$PROFILE`）加 **preexec hook**,讓你打 Gemini、Aider、ssh 等其他 AI agent 時 daemon 也會自動啟動。
+5. 預先下載 Whisper 模型（`small` ~500 MB / `medium` ~1.5 GB）。
+
+冪等 — 隨時重跑都安全。
 
 ## 重新安裝 / 升級
 
@@ -107,28 +56,77 @@ git pull
 ./uninstall.sh       # macOS / Linux
 ```
 
-從 `~/.claude/settings.json` 移除 hook 並停 daemon。其他 hook 保留。repo 檔案留著,要徹底清除自己刪目錄。
+從 `~/.claude/settings.json` 移除 hook、從 shell 設定移除 preexec 區塊、強制停 daemon。repo 檔案保留。
 
 ## 使用
 
-安裝完照常使用 AI 工具即可,daemon 自動伴隨 session 啟動。按住熱鍵講話：
+安裝完照常使用 AI 工具,daemon 自動就位。按住熱鍵講話：
 
-| 平台 | 按鍵 | 行為 |
-|------|------|------|
-| Windows | 空白鍵(短按) | 一般空白(正常打字) |
-| Windows | 空白鍵(按住 ≥ 250ms) | 錄音 → 轉錄 → 貼上 → 送出 |
-| macOS | Cmd(按住) | 即時錄音 → 放開 → 送出 |
-| macOS | Cmd+其他鍵 | 正常快捷鍵(自動取消語音) |
+| 平台 | 行為 |
+|------|------|
+| Windows | 按住空白鍵 ≥ 250ms → 講話 → 放開。短按仍是一般空白 |
+| macOS | 按住 Cmd → 講話 → 放開。Cmd+其他鍵（例 Cmd+C）自動取消 |
+| Linux | 按住 F9 → 講話 → 放開 |
+
+## 運作原理
+
+```
+                 ┌──────────────────────────────────────────────┐
+   三層啟動機制  │ Layer 1: Claude SessionStart hook            │
+   覆蓋任何      │   → 開 `claude` 時觸發                       │
+   AI agent      ├──────────────────────────────────────────────┤
+   在任何        │ Layer 2: Shell preexec hook                  │
+   終端機:       │   → 打 `claude / gemini / aider / codex /    │
+                 │     ssh` + Enter 時觸發                      │
+                 │     (zsh preexec、bash DEBUG trap、          │
+                 │      PowerShell PSReadLine)                  │
+                 ├──────────────────────────────────────────────┤
+                 │ Layer 3: start-voice 自我修復                │
+                 │   → venv 不存在就自動重建                    │
+                 └──────────────────────────────────────────────┘
+                                       ↓
+              ┌──────────────────────────────────────────────┐
+              │ Daemon 載入完成（Whisper 模型在記憶體裡）    │
+              │   → Win32 LL hook（Windows）                 │
+              │   → pynput listener（macOS / Linux）         │
+              └──────────────────────────────────────────────┘
+                                       ↓
+              ┌──────────────────────────────────────────────┐
+              │ 你按住熱鍵                                   │
+              │   → 焦點檢查：前景是 AI agent 嗎？           │
+              │       Win32 GetForegroundWindow + tree (Win) │
+              │       NSWorkspace + Quartz title (mac)       │
+              │       xdotool + tree (Linux)                 │
+              │   → 是 → 開始錄音 (sounddevice)              │
+              └──────────────────────────────────────────────┘
+                                       ↓
+              ┌──────────────────────────────────────────────┐
+              │ 你放開                                       │
+              │   → faster-whisper 在本地轉錄                │
+              │   → 剪貼簿 ← 文字 + <voice> 標記             │
+              │   → Ctrl+V（macOS Cmd+V）貼到焦點視窗        │
+              │   → Enter（若 VOICE_AUTO_SUBMIT=1）          │
+              └──────────────────────────────────────────────┘
+                                       ↓
+              ┌──────────────────────────────────────────────┐
+              │ 所有 AI session 都關了                       │
+              │   → SessionEnd hook 檢查存活的 process       │
+              │   → 都沒了才停 daemon                        │
+              │     (含 SSH session,保守策略)                │
+              └──────────────────────────────────────────────┘
+```
+
+全程本地運行 — 不需網路、不需 API key、資料不離開你的電腦。
 
 ## 設定
 
-寫在 `.env`（repo 根目錄）。
+寫在 repo 根目錄的 `.env`。
 
 | 變數 | 預設 | 說明 |
 |------|------|------|
 | `VOICE_LANGUAGE` | `zh` | Whisper 語言提示 |
-| `VOICE_AUTO_SUBMIT` | `1` | `0` 只貼上不送出 — 可先檢查或混搭打字。設 `1` 時 ASR 瑕疵由 `<voice>` 標記讓 Claude 自動容錯。 |
-| `VOICE_HOLD_THRESHOLD_SEC` | `0.25` | Windows 空白鍵長短按切點(macOS 不使用) |
+| `VOICE_AUTO_SUBMIT` | `1` | `0` 只貼上不送出。可用於檢查或混搭打字 |
+| `VOICE_HOLD_THRESHOLD_SEC` | `0.25` | Windows 空白鍵長短按切點（macOS 不使用） |
 | `VOICE_MARKER` | ` <voice>` | 語音標記後綴,空字串停用 |
 | `WHISPER_MODEL_SIZE` | auto | CUDA → `medium`,CPU → `small` |
 | `WHISPER_DEVICE` | auto | `cuda` 或 `cpu` |
@@ -136,17 +134,7 @@ git pull
 
 ## 語音標記
 
-轉錄送出時長這樣：
-
-```
-今天天氣如何 <voice>
-```
-
-在 Claude Code 中,`CLAUDE.md` 指示 Claude 容忍語音標記：同音字、漏標點、聲調錯都自動腦補。其他工具(Gemini、Claude Desktop)收到原始文字加標記,無害;不想要就 `VOICE_MARKER=` 設空。
-
-## Daemon 生命週期
-
-Daemon 只要系統上還有 `claude` process 就不會死。最後一個關了且 `SessionEnd` 觸發時才停。不用 counter 檔,不怕漂移 — 直接看活著的 process。
+每筆轉錄送出時是 `<文字> <voice>`。在 Claude Code 中,`CLAUDE.md` 指示 Claude 容忍語音標記：同音字、漏標點、聲調錯都自動腦補。其他工具會收到原始文字加標記,無害;不想要就 `VOICE_MARKER=` 設空。
 
 ## 日誌
 
@@ -156,46 +144,34 @@ Daemon 只要系統上還有 `claude` process 就不會死。最後一個關了�
 | macOS | `$TMPDIR/claude-voice.log` | `$TMPDIR/claude-voice.pid` |
 | Linux | `/tmp/claude-voice.log` | `/tmp/claude-voice.pid` |
 
-## 手動啟動 / 重啟 daemon
+## 手動 daemon 控制
 
-如果 daemon 沒在跑（如 uninstall 後重裝、或意外崩潰），手動啟動：
-
-```bash
-# Windows
-powershell -ExecutionPolicy Bypass -File scripts\start-voice.ps1
-
-# macOS / Linux
-bash scripts/start-voice.sh
-```
-
-強制重啟：
+Daemon 通常自動啟動。debug 用的手動指令：
 
 ```bash
-# Windows
-powershell -ExecutionPolicy Bypass -File scripts\stop-voice.ps1 -Force
-powershell -ExecutionPolicy Bypass -File scripts\start-voice.ps1
+# 啟動（冪等）
+.\scripts\start-voice.ps1     # Windows
+bash scripts/start-voice.sh   # macOS / Linux
 
-# macOS / Linux
+# 強制停止
+.\scripts\stop-voice.ps1 -Force
 bash scripts/stop-voice.sh --force
-bash scripts/start-voice.sh
 ```
 
 ## VS Code 注意事項
 
 語音在 VS Code 整合終端可以使用,兩點注意：
 
-1. **內建語音衝突。** Claude Code extension 有自己的英文語音用同一個熱鍵。`install.ps1` / `install.sh` 安裝時會自動關閉（`voiceEnabled: false`）以避免亂碼。
+1. **內建語音衝突** — Claude Code extension 有自己的英文語音用同一個熱鍵。安裝腳本會自動關閉（`voiceEnabled: false`）以避免亂碼。
 
-2. **貼上目標。** VS Code 有多個 panel,Ctrl+V 送到「游標所在的 panel」。如果游標在程式碼編輯區,轉錄會貼到原始碼裡。**講話前先點一下 terminal panel** 確保游標在那。
+2. **貼上目標** — VS Code 有多個 panel,Ctrl+V 送到「游標所在的 panel」。**講話前先點一下 terminal panel** 確保游標在那。
 
 ## 常見問題
 
-- **Daemon 沒在跑。** Daemon 靠 `SessionStart` hook 在你開啟 Claude/Gemini session 時自動啟動。若沒啟動（權限被拒、venv 損壞、腳本錯誤），請手動重啟（見[手動啟動 / 重啟 daemon](#手動啟動--重啟-daemon)）。若持續發生，重跑 `./install.ps1` 或 `./install.sh` 以修復 venv 並重新註冊 hook。
-- **熱鍵沒反應。** 看 `claude-voice.log` 有沒有 `● 錄音中...`。沒有 = 焦點偵測沒命中或 daemon 沒在跑。確認 `claude` process 存在,若 daemon 不在就手動啟動（見上方）。
+- **Daemon 沒在跑。** 看 `claude-voice.log`。Daemon 靠 `SessionStart` hook（Claude）或 preexec hook（其他 agent / SSH）自動啟動。如果掛掉了,用 `start-voice.{ps1,sh}` 手動重啟。持續失敗 → 重跑 install 修復 venv。
+- **熱鍵沒反應。** 確認 AI agent process 存在（`tasklist` / `ps -ef | grep claude`）。看 log 按住熱鍵後有沒有 `● 錄音中...`。
 - **macOS：Cmd 沒反應。** 去「系統設定 → 隱私權與安全性 → 輔助使用」把你的終端機加進去。
-- **轉錄為空。** 講久一點(≥ 0.5 秒),VAD 會過濾太短的音訊。
-- **Windows：空白鍵卡住。** 強制重啟 daemon（見上方）。
+- **轉錄為空。** 講久一點（≥ 0.5 秒）,VAD 會過濾太短的音訊。
+- **Windows：空白鍵卡住。** 強制重啟 daemon。
 
-> **附註：** 多 tab 終端機（Windows Terminal、VS Code、Terminal.app、iTerm2）共用同一個 process,語音偵測作用於整個終端 app 而非個別 tab。只要其中一個 tab 有跑 AI agent,同視窗的所有 tab 都能觸發語音。實際使用上幾乎不受影響。
->
-> **Daemon 生命週期：** Daemon 靠 `SessionStart` hook 在你開 Claude session 時啟動,靠 `SessionEnd` hook 在所有 Claude process 結束時停止。這是設計使然——防止背景 process 堆積。若你在一個 Claude 視窗還開著時又開了新的,daemon 會持續執行,語音功能無縫接續運作。
+> **多 tab 終端機**（Windows Terminal、VS Code、Terminal.app、iTerm2）共用一個 process。偵測作用於整個 app — 只要其中一個 tab 有 Claude,同視窗的所有 tab 都能觸發語音。實務上可接受。
