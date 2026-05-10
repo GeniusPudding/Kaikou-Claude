@@ -84,7 +84,7 @@ fi
 # 7. Make scripts executable and register hooks.
 chmod +x "$repo_dir/scripts/start-voice.sh" "$repo_dir/scripts/stop-voice.sh" 2>/dev/null || true
 mkdir -p "$(dirname "$settings_file")"
-"$venv_python" "$patch_script" "$settings_file" install unix "$repo_dir"
+"$python_cmd" "$patch_script" "$settings_file" install unix "$repo_dir"
 
 # 8. Initialize venv and dependencies via start-voice.sh (if not already done).
 bash "$repo_dir/scripts/start-voice.sh" >/dev/null 2>&1

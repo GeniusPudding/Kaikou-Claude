@@ -56,11 +56,25 @@ if [[ ! -x "$python_bin" ]]; then
     }
 
     echo "Installing dependencies..." >&2
-    "$python_bin" -m pip install --upgrade pip -q >/dev/null 2>&1
-    "$python_bin" -m pip install -r "$voice_dir/requirements.txt" -q >/dev/null 2>&1 || {
-        echo '{"systemMessage":"[Kaikou-Claude] Dependency installation failed. Run install.sh to fix."}'
-        exit 1
-    }
+    "$python_bin" -m pip install --upgrade pip setuptools wheel -q >/dev/null 2>&1
+
+    # Try to install dependencies; capture errors
+    install_output=$("$python_bin" -m pip install -r "$voice_dir/requirements.txt" 2>&1)
+    install_status=$?
+
+    if [[ $install_status -eq 0 ]]; then
+        echo "Dependencies installed successfully." >&2
+    else
+        # Check for common macOS compilation errors
+        if echo "$install_output" | grep -q "Cannot locate a working compiler"; then
+            echo '{"systemMessage":"[kaikou-claude] macOS: Need Xcode Command Line Tools. Run: xcode-select --install"}'
+            exit 1
+        elif echo "$install_output" | grep -q "error"; then
+            echo '{"systemMessage":"[kaikou-claude] Dependency installation failed. See: '"$log_file"' for details."}'
+            echo "$install_output" >> "$log_file"
+            exit 1
+        fi
+    fi
 fi
 
 nohup "$python_bin" "$script" >>"$log_file" 2>&1 &
