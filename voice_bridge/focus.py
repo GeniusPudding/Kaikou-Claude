@@ -140,6 +140,129 @@ def _build_foreground_helpers():
 _get_foreground_pid, _get_foreground_key, _get_foreground_title = _build_foreground_helpers()
 
 
+def _build_target_helpers():
+    """Return (capture, restore) for remembering and restoring focus.
+
+    Used by the audio module: when the user presses the hotkey we snapshot
+    the current foreground window so the eventual Ctrl+V / Cmd+V lands
+    there even if the user has since switched to a different window during
+    the transcription delay.
+    """
+    if config.IS_WIN:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        user32.GetForegroundWindow.restype = wintypes.HWND
+        user32.IsIconic.argtypes = [wintypes.HWND]
+        user32.IsIconic.restype = wintypes.BOOL
+        user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+        user32.ShowWindow.restype = wintypes.BOOL
+        user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+        user32.SetForegroundWindow.restype = wintypes.BOOL
+        user32.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
+        user32.AttachThreadInput.restype = wintypes.BOOL
+        user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+        user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+        kernel32.GetCurrentThreadId.restype = wintypes.DWORD
+        SW_RESTORE = 9
+
+        def capture():
+            hwnd = user32.GetForegroundWindow()
+            return int(hwnd) if hwnd else None
+
+        def restore(handle):
+            if not handle:
+                return False
+            hwnd = wintypes.HWND(handle)
+            if user32.IsIconic(hwnd):
+                user32.ShowWindow(hwnd, SW_RESTORE)
+            # SetForegroundWindow is restricted unless we attach to the
+            # target thread's input queue first. This is the standard
+            # documented workaround.
+            target_tid = user32.GetWindowThreadProcessId(hwnd, None)
+            current_tid = kernel32.GetCurrentThreadId()
+            attached = user32.AttachThreadInput(current_tid, target_tid, True)
+            try:
+                ok = bool(user32.SetForegroundWindow(hwnd))
+            finally:
+                if attached:
+                    user32.AttachThreadInput(current_tid, target_tid, False)
+            return ok
+
+        return capture, restore
+
+    if config.IS_MAC:
+        def capture():
+            try:
+                from AppKit import NSWorkspace
+                app = NSWorkspace.sharedWorkspace().frontmostApplication()
+                return int(app.processIdentifier()) if app else None
+            except Exception:
+                return None
+
+        def restore(pid):
+            if not pid:
+                return False
+            try:
+                from AppKit import (
+                    NSRunningApplication, NSApplicationActivateIgnoringOtherApps,
+                )
+                app = NSRunningApplication.runningApplicationWithProcessIdentifier_(int(pid))
+                if app is None:
+                    return False
+                return bool(app.activateWithOptions_(NSApplicationActivateIgnoringOtherApps))
+            except Exception:
+                return False
+
+        return capture, restore
+
+    # Linux X11 via xdotool
+    import subprocess
+
+    def capture():
+        try:
+            out = subprocess.check_output(
+                ["xdotool", "getactivewindow"],
+                stderr=subprocess.DEVNULL, timeout=0.3, text=True,
+            ).strip()
+            return out or None
+        except (FileNotFoundError, subprocess.CalledProcessError,
+                subprocess.TimeoutExpired):
+            return None
+
+    def restore(handle):
+        if not handle:
+            return False
+        try:
+            subprocess.check_call(
+                ["xdotool", "windowactivate", "--sync", str(handle)],
+                stderr=subprocess.DEVNULL, timeout=0.5,
+            )
+            return True
+        except (FileNotFoundError, subprocess.CalledProcessError,
+                subprocess.TimeoutExpired):
+            return False
+
+    return capture, restore
+
+
+_capture_target, _restore_target = _build_target_helpers()
+
+
+def capture_target_window():
+    """Snapshot the current foreground window. Returns an opaque handle
+    (Win32 HWND int / macOS PID / X11 window-id string) or None on failure.
+    """
+    return _capture_target()
+
+
+def restore_target_window(handle) -> bool:
+    """Bring the previously-captured window back to the foreground."""
+    return _restore_target(handle)
+
+
 def _looks_like_cc(proc: psutil.Process) -> bool:
     try:
         name = (proc.name() or "").lower()

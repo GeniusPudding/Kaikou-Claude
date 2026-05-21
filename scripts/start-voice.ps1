@@ -8,6 +8,8 @@ $pythonw  = Join-Path $voiceDir '.venv\Scripts\pythonw.exe'
 $script   = Join-Path $voiceDir 'voice_to_claude.py'
 
 # Hook output: systemMessage shown to user.
+# The daemon itself notices the release sentinel and boots into CPU
+# fallback mode, so this launcher unconditionally ensures a daemon exists.
 $msg = '{"systemMessage":"\u4e2d\u6587\u8a9e\u97f3\u5df2\u555f\u52d5 \u2014 \u6309\u4f4f\u7a7a\u767d\u9375\u8b1b\u4e2d\u6587,\u653e\u958b\u81ea\u52d5\u9001\u51fa(\u77ed\u6309\u7a7a\u767d\u4ecd\u662f\u4e00\u822c\u7a7a\u767d)"}'
 
 # Already running?

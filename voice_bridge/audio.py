@@ -4,8 +4,29 @@ Kept fully platform-agnostic: recording goes through sounddevice, the model
 comes from faster-whisper, and the paste step uses pyperclip + a cross-
 platform pynput Controller. The hotkey backends call :func:`start_recording`
 and :func:`stop_and_submit` regardless of OS.
+
+Model lifecycle
+---------------
+On CUDA systems the daemon manages two Whisper instances:
+
+* ``_primary``   — the high-quality CUDA model used by default
+  (large-v3-turbo + float16). Resides in VRAM.
+* ``_fallback``  — a small CPU model (small + int8), lazily loaded the
+  first time the user releases the GPU to another workload.
+
+A background watcher polls a sentinel file (written by ``scripts/release-gpu``
+and removed by ``scripts/acquire-gpu``); when the sentinel appears, the
+daemon unloads the primary from the GPU and switches transcription to the
+CPU fallback so voice keeps working — just slower — while the user trains,
+runs inference, etc. When the sentinel disappears, the primary is reloaded
+on the GPU and becomes active again.
+
+CPU-only systems (e.g. macOS without CUDA) load only ``_primary`` (small +
+int8 on CPU) and the watcher is not started; release/acquire are a no-op
+because there is no GPU to release in the first place.
 """
 
+import os
 import threading
 import time
 
@@ -14,7 +35,7 @@ import pyperclip
 import sounddevice as sd
 from pynput import keyboard as kb
 
-from . import config
+from . import config, focus
 
 try:
     import winsound  # Windows-only, used for quick audible feedback
@@ -24,104 +45,189 @@ except ImportError:
 
 _kb_ctrl = kb.Controller()
 _state = {"recording": False, "frames": [], "stream": None}
-_model = None
 _lock = threading.Lock()
+# Window that had focus when the user pressed the hotkey — Ctrl+V/Cmd+V
+# is sent to whatever window is foreground at paste time, so we restore
+# this one before pasting in case the user switched apps mid-recording.
+_target_handle = None
 
-# Model-resident-on-GPU tracking. On CUDA-backed daemons the underlying
-# ctranslate2 Whisper instance can be swapped to CPU RAM after a period of
-# inactivity so other GPU workloads (training, etc.) are not blocked.
-# "loaded"  – weights live on the configured device, ready for transcribe
-# "swapped" – weights kicked off the GPU into CPU RAM via unload_model(to_cpu=True)
-_model_state = "loaded"
-_model_device = None  # actual device the model ended up on after init
+# Model slots and active selector. Only ever access via the helpers below
+# under _model_lock so the sentinel watcher and the hotkey transcribe path
+# don't trip over each other while we swap WhisperModel instances.
+_primary = None         # WhisperModel; CUDA turbo when available, else CPU small
+_fallback = None        # WhisperModel; CPU small. None until first release.
+_active = "primary"     # "primary" | "fallback"
+_primary_device = None  # "cuda" | "cpu" — what _primary was actually instantiated on
 _model_lock = threading.RLock()
-_idle_timer = None  # threading.Timer when scheduled
+_watcher_stop = threading.Event()
+
+
+def _active_model():
+    """Return the currently-active WhisperModel under the model lock."""
+    if _active == "fallback" and _fallback is not None:
+        return _fallback
+    return _primary
 
 
 def load_model():
-    """Instantiate the faster-whisper model once at startup.
+    """Instantiate the primary model and (on CUDA) start the sentinel watcher.
 
-    Falls back to CPU/small if a CUDA load fails (e.g. driver mismatch).
+    If the release sentinel is already present at startup *and* we'd normally
+    target CUDA, we skip the primary load entirely and boot straight into
+    fallback (CPU small + int8). This avoids briefly allocating VRAM the user
+    has explicitly freed for another workload; primary is loaded later when
+    ``acquire-gpu`` removes the sentinel.
     """
-    global _model, _model_device
+    global _primary, _primary_device, _active
     from faster_whisper import WhisperModel
+
+    target_cuda = config.DEVICE == "cuda"
+    sentinel_at_startup = target_cuda and os.path.exists(config.RELEASE_SENTINEL_PATH)
+
+    if sentinel_at_startup:
+        print(
+            f"偵測到 release sentinel({config.RELEASE_SENTINEL_PATH}) → "
+            "略過 primary,直接啟動 CPU fallback",
+            flush=True,
+        )
+        _primary_device = "cuda"   # remember the intent; primary will load on acquire
+        _ensure_fallback_loaded()
+        if _fallback is None:
+            raise RuntimeError("Failed to load CPU fallback model with release sentinel active")
+        _active = "fallback"
+        threading.Thread(target=_sentinel_watch_loop, daemon=True, name="release-watcher").start()
+        return
 
     t0 = time.time()
     try:
-        _model = WhisperModel(config.MODEL_SIZE, device=config.DEVICE, compute_type=config.COMPUTE_TYPE)
+        _primary = WhisperModel(config.MODEL_SIZE, device=config.DEVICE, compute_type=config.COMPUTE_TYPE)
         used_device = config.DEVICE
         used_model = config.MODEL_SIZE
     except Exception as e:
-        if config.DEVICE == "cuda":
+        if target_cuda:
             print(f"× CUDA 載入失敗({e}),回退 CPU+small", flush=True)
-            _model = WhisperModel("small", device="cpu", compute_type="int8")
+            _primary = WhisperModel("small", device="cpu", compute_type="int8")
             used_device = "cpu"
             used_model = "small"
         else:
             raise
-    _model_device = used_device
+    _primary_device = used_device
     print(f"✓ 模型就緒({time.time() - t0:.1f}s, {used_device}, {used_model})", flush=True)
-    if _model_device == "cuda" and config.IDLE_UNLOAD_SEC > 0:
+
+    if _primary_device == "cuda":
         print(
-            f"VRAM 閒置自動釋放:{config.IDLE_UNLOAD_SEC:.0f}s 沒講話就把權重搬回 CPU RAM",
+            f"Release sentinel: {config.RELEASE_SENTINEL_PATH}  "
+            "(run scripts/release-gpu to hand the GPU over)",
             flush=True,
         )
-        _schedule_idle_unload()
+        threading.Thread(target=_sentinel_watch_loop, daemon=True, name="release-watcher").start()
 
 
-def _swap_to_cpu():
-    """Move weights from GPU to CPU RAM (fast to reload).
+def _ensure_fallback_loaded():
+    """Load the small CPU fallback model lazily, the first time it's needed."""
+    global _fallback
+    if _fallback is not None:
+        return
+    from faster_whisper import WhisperModel
+    t0 = time.time()
+    try:
+        _fallback = WhisperModel(
+            config.FALLBACK_MODEL_SIZE, device="cpu", compute_type=config.FALLBACK_COMPUTE_TYPE,
+        )
+        print(
+            f"↻ CPU fallback 模型已載入({config.FALLBACK_MODEL_SIZE} + "
+            f"{config.FALLBACK_COMPUTE_TYPE}, {time.time() - t0:.1f}s)",
+            flush=True,
+        )
+    except Exception as e:
+        print(f"× CPU fallback 載入失敗: {e}", flush=True)
+        _fallback = None
 
-    Runs from the idle Timer thread; no-op if model is already swapped or
-    is not on cuda in the first place.
+
+def _switch_to_fallback():
+    """Move active transcription from CUDA primary to CPU fallback.
+
+    No-op on CPU-only daemons (primary is already the small CPU model).
     """
-    global _model_state, _idle_timer
+    global _active
     with _model_lock:
-        _idle_timer = None
-        if _model is None or _model_device != "cuda" or _model_state != "loaded":
+        if _primary_device != "cuda":
             return
+        if _active == "fallback":
+            return
+        _ensure_fallback_loaded()
+        if _fallback is None:
+            return  # load failed; stay on primary so user isn't dead in the water
         try:
-            _model.model.unload_model(to_cpu=True)
-            _model_state = "swapped"
-            print("↓ 閒置,VRAM 已釋放(權重暫存於 CPU RAM)", flush=True)
+            _primary.model.unload_model(to_cpu=False)
         except Exception as e:
-            print(f"× VRAM 釋放失敗: {e}", flush=True)
+            print(f"× 從 GPU 卸載 primary 失敗: {e}", flush=True)
+            return
+        _active = "fallback"
+        print(
+            "⇣ GPU 已釋放,語音改用 CPU(慢一點但仍可用)。"
+            "訓練完跑 acquire-gpu 切回 CUDA。",
+            flush=True,
+        )
 
 
-def _ensure_loaded():
-    """Swap weights back to the configured device if currently on CPU RAM."""
+def _switch_to_primary():
+    """Move active transcription back to the CUDA primary.
+
+    Handles two cases:
+      1. ``_primary`` already exists (daemon started normally, was later
+         released): re-load the existing weights back onto the GPU
+         (~1-2s — they're still cached in process memory).
+      2. ``_primary`` is None (daemon started with the sentinel present
+         and skipped the primary load): construct the model from disk
+         now (~10-15s, first time only).
+    """
+    global _active, _primary
     with _model_lock:
-        global _model_state
-        if _model is None or _model_state == "loaded":
+        if _primary_device != "cuda":
+            return
+        if _active == "primary":
             return
         t0 = time.time()
-        try:
-            _model.model.load_model()
-            _model_state = "loaded"
-            print(f"↑ VRAM 重載({time.time() - t0:.1f}s)", flush=True)
-        except Exception as e:
-            print(f"× VRAM 重載失敗: {e}", flush=True)
+        if _primary is None:
+            from faster_whisper import WhisperModel
+            try:
+                _primary = WhisperModel(
+                    config.MODEL_SIZE, device=config.DEVICE, compute_type=config.COMPUTE_TYPE,
+                )
+            except Exception as e:
+                print(f"× primary 首次載入失敗,留在 CPU fallback: {e}", flush=True)
+                return
+        else:
+            try:
+                _primary.model.load_model()
+            except Exception as e:
+                print(f"× primary 重載到 GPU 失敗,留在 CPU fallback: {e}", flush=True)
+                return
+        _active = "primary"
+        print(
+            f"⇡ GPU 取回,切回 {config.MODEL_SIZE}({time.time() - t0:.1f}s)",
+            flush=True,
+        )
 
 
-def _cancel_idle_unload():
-    global _idle_timer
-    with _model_lock:
-        if _idle_timer is not None:
-            _idle_timer.cancel()
-            _idle_timer = None
+def _sentinel_watch_loop():
+    """Background watcher that flips primary↔fallback on sentinel changes.
 
-
-def _schedule_idle_unload():
-    """Reset the inactivity timer that triggers _swap_to_cpu."""
-    global _idle_timer
-    if _model_device != "cuda" or config.IDLE_UNLOAD_SEC <= 0:
-        return
-    with _model_lock:
-        if _idle_timer is not None:
-            _idle_timer.cancel()
-        _idle_timer = threading.Timer(config.IDLE_UNLOAD_SEC, _swap_to_cpu)
-        _idle_timer.daemon = True
-        _idle_timer.start()
+    Runs only on CUDA daemons. Polls every ``SENTINEL_POLL_SEC`` and only
+    acts when the file's presence state changes, so a stale sentinel from
+    before startup doesn't cause repeated switches.
+    """
+    last_present = os.path.exists(config.RELEASE_SENTINEL_PATH)
+    while not _watcher_stop.wait(config.SENTINEL_POLL_SEC):
+        present = os.path.exists(config.RELEASE_SENTINEL_PATH)
+        if present == last_present:
+            continue
+        if present:
+            _switch_to_fallback()
+        else:
+            _switch_to_primary()
+        last_present = present
 
 
 def _beep(freq, ms=90):
@@ -138,9 +244,10 @@ def _audio_cb(indata, frames_count, time_info, status):
 
 
 def start_recording():
-    # User is interacting again — keep the model on GPU for the duration of
-    # this round; new unload timer will be scheduled after transcription.
-    _cancel_idle_unload()
+    global _target_handle
+    # Snapshot the current foreground window now, so the eventual paste
+    # lands here regardless of where the user is looking when we finish.
+    _target_handle = focus.capture_target_window()
     with _lock:
         if _state["recording"]:
             return
@@ -155,7 +262,10 @@ def start_recording():
         stream.start()
         _state["stream"] = stream
     _beep(880)
-    print("● 錄音中...", flush=True)
+    if _active == "fallback":
+        print("● 錄音中...(GPU 已釋放,將用 CPU 轉錄)", flush=True)
+    else:
+        print("● 錄音中...", flush=True)
 
 
 def _paste_and_submit(text: str):
@@ -166,7 +276,16 @@ def _paste_and_submit(text: str):
     except Exception:
         pass
     pyperclip.copy(payload)
-    time.sleep(0.1)
+    # Restore the window that was active when the user pressed the hotkey,
+    # in case they switched apps while we were transcribing.
+    if _target_handle is not None:
+        try:
+            focus.restore_target_window(_target_handle)
+        except Exception as e:
+            print(f"× 還原焦點失敗: {e}", flush=True)
+        time.sleep(0.08)  # let the OS register the focus change before Ctrl+V
+    else:
+        time.sleep(0.1)
     paste_modifier = kb.Key.cmd if config.IS_MAC else kb.Key.ctrl
     _kb_ctrl.press(paste_modifier)
     _kb_ctrl.press("v")
@@ -209,24 +328,24 @@ def stop_and_submit():
     print("… 轉錄中", flush=True)
     try:
         with _model_lock:
-            _ensure_loaded()
-            segments, _info = _model.transcribe(
+            model = _active_model()
+            if model is None:
+                print("× 沒有可用的轉錄模型", flush=True)
+                return
+            segments, _info = model.transcribe(
                 audio_f32, language=config.LANGUAGE, beam_size=1, vad_filter=True,
             )
             text = "".join(seg.text for seg in segments).strip()
     except Exception as e:
         print(f"× 轉錄失敗: {e}", flush=True)
-        _schedule_idle_unload()
         return
 
     if not text:
         print("× 轉錄結果為空", flush=True)
-        _schedule_idle_unload()
         return
     print(f"→ {text}", flush=True)
     _paste_and_submit(text)
     _beep(1200, 70)
-    _schedule_idle_unload()
 
 
 def discard_recording():
@@ -241,7 +360,6 @@ def discard_recording():
         stream.stop()
         stream.close()
     print("⏹ 錄音已作廢", flush=True)
-    _schedule_idle_unload()
 
 
 def inject_key(key):

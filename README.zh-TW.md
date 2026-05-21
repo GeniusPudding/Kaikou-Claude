@@ -131,7 +131,34 @@ git pull
 | `WHISPER_MODEL_SIZE` | auto | CUDA → `large-v3-turbo`,CPU → `small` |
 | `WHISPER_DEVICE` | auto | `cuda` 或 `cpu` |
 | `WHISPER_COMPUTE_TYPE` | auto | CUDA → `float16`,CPU → `int8` |
-| `VOICE_IDLE_UNLOAD_SEC` | `300` | 僅 CUDA:閒置這麼多秒後把權重從 VRAM 換到 CPU RAM,讓 GPU 還給訓練等其他工作。下次轉錄會多 ~1-2 秒換回。設 `0` 則永久常駐 GPU |
+| `VOICE_FALLBACK_MODEL_SIZE` | `small` | GPU 釋放期間用的 CPU 模型,第一次釋放才載入 |
+| `VOICE_FALLBACK_COMPUTE_TYPE` | `int8` | Fallback 模型的 compute type |
+
+## 把 GPU 借給別的程式
+
+別的程式臨時需要 VRAM 時(模型訓練、圖像生成、任何用 GPU 的東西),交出 GPU 但語音不中斷:
+
+```bash
+# Windows
+.\scripts\release-gpu.ps1
+# macOS / Linux
+./scripts/release-gpu.sh
+```
+
+Daemon 會把 CUDA primary 從 GPU 卸載、懶載入 CPU 小模型、繼續服務語音 — 轉錄變慢個幾秒,但仍可用。Release / acquire 兩個動作都**必須由使用者顯式觸發** — daemon 沒辦法知道你的另一個工作什麼時候用完 GPU,所以絕不會自動切回去。
+
+要拿回來時:
+
+```bash
+# Windows
+.\scripts\acquire-gpu.ps1
+# macOS / Linux
+./scripts/acquire-gpu.sh
+```
+
+CUDA primary 重新載回 GPU(~1-2 秒;若 daemon 是在 sentinel 已存在時才啟動的,首次 acquire 要 ~10-15 秒)。
+
+純 CPU 系統(沒 CUDA 的 Mac)直接忽略 sentinel — 本來就是在 CPU 跑,沒 GPU 可釋放。
 
 ## 語音標記
 

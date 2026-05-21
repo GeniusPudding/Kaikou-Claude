@@ -27,10 +27,12 @@ VOICE_MARKER = os.getenv("VOICE_MARKER", " <voice>")
 HOLD_THRESHOLD_SEC = float(os.getenv("VOICE_HOLD_THRESHOLD_SEC", "0.25"))
 FOCUS_CACHE_TTL_SEC = float(os.getenv("FOCUS_CACHE_TTL_SEC", "0.05"))
 
-# Auto-release VRAM after this many seconds of inactivity (CUDA only).
-# Weights are kept in CPU RAM for fast (~1-2s) reload on next use. Set to 0
-# to disable and keep the model resident on the GPU permanently.
-IDLE_UNLOAD_SEC = float(os.getenv("VOICE_IDLE_UNLOAD_SEC", "300"))
+# Fallback model used while the GPU is released to other workloads
+# (scripts/release-gpu.{ps1,sh}). Lazily loaded on first release so the
+# startup cost stays low. Only relevant when primary runs on CUDA.
+FALLBACK_MODEL_SIZE = os.getenv("VOICE_FALLBACK_MODEL_SIZE", "small")
+FALLBACK_COMPUTE_TYPE = os.getenv("VOICE_FALLBACK_COMPUTE_TYPE", "int8")
+SENTINEL_POLL_SEC = float(os.getenv("VOICE_SENTINEL_POLL_SEC", "1.0"))
 
 
 def _detect_cuda() -> bool:
@@ -54,3 +56,6 @@ MODEL_SIZE = _env_model or ("large-v3-turbo" if DEVICE == "cuda" else "small")
 
 LOG_PATH = os.path.join(tempfile.gettempdir(), "claude-voice.log")
 PID_PATH = os.path.join(tempfile.gettempdir(), "claude-voice.pid")
+# Sentinel file: presence == GPU released to another workload, daemon should
+# run on the CPU fallback model. Written by release-gpu, removed by acquire-gpu.
+RELEASE_SENTINEL_PATH = os.path.join(tempfile.gettempdir(), "claude-voice.paused")

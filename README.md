@@ -130,7 +130,34 @@ Edit `.env` in the repo root.
 | `WHISPER_MODEL_SIZE` | auto | `large-v3-turbo` on CUDA, `small` on CPU. |
 | `WHISPER_DEVICE` | auto | `cuda` or `cpu`. |
 | `WHISPER_COMPUTE_TYPE` | auto | `float16` on CUDA, `int8` on CPU. |
-| `VOICE_IDLE_UNLOAD_SEC` | `300` | CUDA only: after this many idle seconds, weights are swapped from VRAM to CPU RAM so other workloads can use the GPU. Next transcription pays a ~1-2s reload. Set `0` to keep the model resident on the GPU. |
+| `VOICE_FALLBACK_MODEL_SIZE` | `small` | CPU model used while the GPU is released. Lazily loaded on first release. |
+| `VOICE_FALLBACK_COMPUTE_TYPE` | `int8` | Compute type for the fallback model. |
+
+## Release the GPU for other workloads
+
+When another process needs the VRAM (model training, image generation, anything else), hand the GPU over without losing voice:
+
+```bash
+# Windows
+.\scripts\release-gpu.ps1
+# macOS / Linux
+./scripts/release-gpu.sh
+```
+
+The daemon unloads the CUDA primary, lazily loads a small CPU model, and keeps serving voice — transcription just becomes a few seconds slower per utterance. Both transitions are explicit; the daemon never auto-acquires because it has no way to tell whether your other workload is still using the GPU.
+
+When you're done:
+
+```bash
+# Windows
+.\scripts\acquire-gpu.ps1
+# macOS / Linux
+./scripts/acquire-gpu.sh
+```
+
+The CUDA primary is reloaded onto the GPU (~1-2s warm, ~10-15s if the daemon was launched while the sentinel was already present).
+
+CPU-only systems (Mac without CUDA) ignore the sentinel — voice is already running on the CPU model, there's nothing to release.
 
 ## Voice marker
 

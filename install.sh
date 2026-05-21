@@ -64,11 +64,6 @@ VOICE_LANGUAGE=zh
 VOICE_AUTO_SUBMIT=1
 VOICE_MARKER= <voice>
 
-# CUDA only: swap weights to CPU RAM after N idle seconds so other
-# workloads can use the GPU. First transcription after idle pays ~1-2s.
-# Set 0 to keep the model permanently on the GPU.
-VOICE_IDLE_UNLOAD_SEC=300
-
 # Model/device auto-detect if left unset:
 #   CUDA available -> cuda + large-v3-turbo + float16
 #   otherwise       -> cpu  + small          + int8
@@ -76,6 +71,12 @@ VOICE_IDLE_UNLOAD_SEC=300
 # WHISPER_MODEL_SIZE=small
 # WHISPER_DEVICE=cpu
 # WHISPER_COMPUTE_TYPE=int8
+
+# CPU fallback model used while the GPU is released to another
+# workload (scripts/release-gpu.{ps1,sh}). Lazily loaded on first
+# release. Only relevant when primary runs on CUDA.
+# VOICE_FALLBACK_MODEL_SIZE=small
+# VOICE_FALLBACK_COMPUTE_TYPE=int8
 EOF
     echo ".env 建立(預設 auto-detect GPU/CPU)"
 fi
