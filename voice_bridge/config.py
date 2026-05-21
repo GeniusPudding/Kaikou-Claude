@@ -42,7 +42,10 @@ _env_model = os.getenv("WHISPER_MODEL_SIZE")
 
 DEVICE = _env_device or ("cuda" if _detect_cuda() else "cpu")
 COMPUTE_TYPE = _env_compute or ("float16" if DEVICE == "cuda" else "int8")
-MODEL_SIZE = _env_model or ("medium" if DEVICE == "cuda" else "small")
+# large-v3-turbo: same VRAM footprint as medium (4-layer decoder vs 32), ~3-5x
+# faster inference, lower WER on Mandarin. Keep small/int8 on CPU because turbo
+# is decoder-light but still has the full large encoder.
+MODEL_SIZE = _env_model or ("large-v3-turbo" if DEVICE == "cuda" else "small")
 
 LOG_PATH = os.path.join(tempfile.gettempdir(), "claude-voice.log")
 PID_PATH = os.path.join(tempfile.gettempdir(), "claude-voice.pid")

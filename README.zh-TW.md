@@ -37,7 +37,7 @@ cd Kaikou-Claude
 2. 寫一份預設 `.env`（若不存在）。
 3. 把 `SessionStart` / `SessionEnd` hook 註冊到 `~/.claude/settings.json`。
 4. 在你的 shell 設定（`~/.bashrc` / `~/.zshrc` / PowerShell `$PROFILE`）加 **preexec hook**,讓你打 Gemini、Aider、ssh 等其他 AI agent 時 daemon 也會自動啟動。
-5. 預先下載 Whisper 模型（`small` ~500 MB / `medium` ~1.5 GB）。
+5. 預先下載 Whisper 模型（CPU `small` ~500 MB / CUDA `large-v3-turbo` ~1.6 GB）。
 
 冪等 — 隨時重跑都安全。
 
@@ -128,7 +128,7 @@ git pull
 | `VOICE_AUTO_SUBMIT` | `1` | `0` 只貼上不送出。可用於檢查或混搭打字 |
 | `VOICE_HOLD_THRESHOLD_SEC` | `0.25` | Windows 空白鍵長短按切點（macOS 不使用） |
 | `VOICE_MARKER` | ` <voice>` | 語音標記後綴,空字串停用 |
-| `WHISPER_MODEL_SIZE` | auto | CUDA → `medium`,CPU → `small` |
+| `WHISPER_MODEL_SIZE` | auto | CUDA → `large-v3-turbo`,CPU → `small` |
 | `WHISPER_DEVICE` | auto | `cuda` 或 `cpu` |
 | `WHISPER_COMPUTE_TYPE` | auto | CUDA → `float16`,CPU → `int8` |
 

@@ -65,8 +65,8 @@ VOICE_AUTO_SUBMIT=1
 VOICE_MARKER= <voice>
 
 # Model/device auto-detect if left unset:
-#   CUDA available -> cuda + medium + float16
-#   otherwise       -> cpu  + small  + int8
+#   CUDA available -> cuda + large-v3-turbo + float16
+#   otherwise       -> cpu  + small          + int8
 # Uncomment to force a specific combo:
 # WHISPER_MODEL_SIZE=small
 # WHISPER_DEVICE=cpu
@@ -93,7 +93,7 @@ import ctranslate2
 from faster_whisper import WhisperModel
 device = 'cuda' if ctranslate2.get_cuda_device_count() > 0 else 'cpu'
 compute = 'float16' if device == 'cuda' else 'int8'
-model_size = 'medium' if device == 'cuda' else 'small'
+model_size = 'large-v3-turbo' if device == 'cuda' else 'small'
 print(f'  {model_size} ({device}, {compute})')
 WhisperModel(model_size, device=device, compute_type=compute)
 print('  done')

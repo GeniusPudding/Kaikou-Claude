@@ -134,7 +134,7 @@ def stop_and_submit():
     print("… 轉錄中", flush=True)
     try:
         segments, _info = _model.transcribe(
-            audio_f32, language=config.LANGUAGE, beam_size=5, vad_filter=True,
+            audio_f32, language=config.LANGUAGE, beam_size=1, vad_filter=True,
         )
         text = "".join(seg.text for seg in segments).strip()
     except Exception as e:

@@ -43,7 +43,7 @@ if ([version]$pyVerStr -lt [version]'3.9') {
 # (it auto-initializes if needed). We only ensure Python exists here.
 
 # 5. .env — only create if missing. Leave device/model unset so the daemon
-#    auto-picks CUDA + medium on GPU machines, CPU + small otherwise.
+#    auto-picks CUDA + large-v3-turbo on GPU machines, CPU + small otherwise.
 if (-not (Test-Path $envFile)) {
     @(
         '# kaikou-claude runtime config',
@@ -52,8 +52,8 @@ if (-not (Test-Path $envFile)) {
         'VOICE_MARKER= <voice>',
         '',
         '# Model/device auto-detect if left unset:',
-        '#   CUDA available -> cuda + medium + float16',
-        '#   otherwise       -> cpu  + small  + int8',
+        '#   CUDA available -> cuda + large-v3-turbo + float16',
+        '#   otherwise       -> cpu  + small          + int8',
         '# Uncomment to force a specific combo:',
         '# WHISPER_MODEL_SIZE=small',
         '# WHISPER_DEVICE=cpu',
@@ -84,7 +84,7 @@ import ctranslate2
 from faster_whisper import WhisperModel
 device = 'cuda' if ctranslate2.get_cuda_device_count() > 0 else 'cpu'
 compute = 'float16' if device == 'cuda' else 'int8'
-model_size = 'medium' if device == 'cuda' else 'small'
+model_size = 'large-v3-turbo' if device == 'cuda' else 'small'
 print(f'  {model_size} ({device}, {compute})')
 WhisperModel(model_size, device=device, compute_type=compute)
 print('  done')

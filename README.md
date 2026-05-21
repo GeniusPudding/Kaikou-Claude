@@ -37,7 +37,7 @@ The installer:
 2. Writes a default `.env` (only if missing).
 3. Registers `SessionStart` / `SessionEnd` hooks in `~/.claude/settings.json`.
 4. Adds a **preexec hook** to your shell config (`~/.bashrc` / `~/.zshrc` / PowerShell `$PROFILE`) so the daemon also auto-starts when you launch other AI agents (Gemini, Aider, etc.) or `ssh`.
-5. Pre-downloads the Whisper model (~500 MB `small` / ~1.5 GB `medium`).
+5. Pre-downloads the Whisper model (~500 MB `small` on CPU / ~1.6 GB `large-v3-turbo` on CUDA).
 
 Idempotent — re-run any time to upgrade or repair.
 
@@ -127,7 +127,7 @@ Edit `.env` in the repo root.
 | `VOICE_AUTO_SUBMIT` | `1` | `0` = paste only, no Enter. Useful for reviewing or mixing voice with typing. |
 | `VOICE_HOLD_THRESHOLD_SEC` | `0.25` | Windows Space tap/hold cutoff (not used on macOS). |
 | `VOICE_MARKER` | ` <voice>` | Sentinel suffix; empty disables. |
-| `WHISPER_MODEL_SIZE` | auto | `medium` on CUDA, `small` on CPU. |
+| `WHISPER_MODEL_SIZE` | auto | `large-v3-turbo` on CUDA, `small` on CPU. |
 | `WHISPER_DEVICE` | auto | `cuda` or `cpu`. |
 | `WHISPER_COMPUTE_TYPE` | auto | `float16` on CUDA, `int8` on CPU. |
 
