@@ -64,6 +64,11 @@ VOICE_LANGUAGE=zh
 VOICE_AUTO_SUBMIT=1
 VOICE_MARKER= <voice>
 
+# CUDA only: swap weights to CPU RAM after N idle seconds so other
+# workloads can use the GPU. First transcription after idle pays ~1-2s.
+# Set 0 to keep the model permanently on the GPU.
+VOICE_IDLE_UNLOAD_SEC=300
+
 # Model/device auto-detect if left unset:
 #   CUDA available -> cuda + large-v3-turbo + float16
 #   otherwise       -> cpu  + small          + int8

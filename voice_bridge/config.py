@@ -27,6 +27,11 @@ VOICE_MARKER = os.getenv("VOICE_MARKER", " <voice>")
 HOLD_THRESHOLD_SEC = float(os.getenv("VOICE_HOLD_THRESHOLD_SEC", "0.25"))
 FOCUS_CACHE_TTL_SEC = float(os.getenv("FOCUS_CACHE_TTL_SEC", "0.05"))
 
+# Auto-release VRAM after this many seconds of inactivity (CUDA only).
+# Weights are kept in CPU RAM for fast (~1-2s) reload on next use. Set to 0
+# to disable and keep the model resident on the GPU permanently.
+IDLE_UNLOAD_SEC = float(os.getenv("VOICE_IDLE_UNLOAD_SEC", "300"))
+
 
 def _detect_cuda() -> bool:
     try:

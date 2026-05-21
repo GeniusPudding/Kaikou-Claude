@@ -131,6 +131,7 @@ git pull
 | `WHISPER_MODEL_SIZE` | auto | CUDA → `large-v3-turbo`,CPU → `small` |
 | `WHISPER_DEVICE` | auto | `cuda` 或 `cpu` |
 | `WHISPER_COMPUTE_TYPE` | auto | CUDA → `float16`,CPU → `int8` |
+| `VOICE_IDLE_UNLOAD_SEC` | `300` | 僅 CUDA:閒置這麼多秒後把權重從 VRAM 換到 CPU RAM,讓 GPU 還給訓練等其他工作。下次轉錄會多 ~1-2 秒換回。設 `0` 則永久常駐 GPU |
 
 ## 語音標記
 

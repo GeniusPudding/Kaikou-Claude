@@ -27,13 +27,23 @@ _state = {"recording": False, "frames": [], "stream": None}
 _model = None
 _lock = threading.Lock()
 
+# Model-resident-on-GPU tracking. On CUDA-backed daemons the underlying
+# ctranslate2 Whisper instance can be swapped to CPU RAM after a period of
+# inactivity so other GPU workloads (training, etc.) are not blocked.
+# "loaded"  – weights live on the configured device, ready for transcribe
+# "swapped" – weights kicked off the GPU into CPU RAM via unload_model(to_cpu=True)
+_model_state = "loaded"
+_model_device = None  # actual device the model ended up on after init
+_model_lock = threading.RLock()
+_idle_timer = None  # threading.Timer when scheduled
+
 
 def load_model():
     """Instantiate the faster-whisper model once at startup.
 
     Falls back to CPU/small if a CUDA load fails (e.g. driver mismatch).
     """
-    global _model
+    global _model, _model_device
     from faster_whisper import WhisperModel
 
     t0 = time.time()
@@ -49,7 +59,69 @@ def load_model():
             used_model = "small"
         else:
             raise
+    _model_device = used_device
     print(f"✓ 模型就緒({time.time() - t0:.1f}s, {used_device}, {used_model})", flush=True)
+    if _model_device == "cuda" and config.IDLE_UNLOAD_SEC > 0:
+        print(
+            f"VRAM 閒置自動釋放:{config.IDLE_UNLOAD_SEC:.0f}s 沒講話就把權重搬回 CPU RAM",
+            flush=True,
+        )
+        _schedule_idle_unload()
+
+
+def _swap_to_cpu():
+    """Move weights from GPU to CPU RAM (fast to reload).
+
+    Runs from the idle Timer thread; no-op if model is already swapped or
+    is not on cuda in the first place.
+    """
+    global _model_state, _idle_timer
+    with _model_lock:
+        _idle_timer = None
+        if _model is None or _model_device != "cuda" or _model_state != "loaded":
+            return
+        try:
+            _model.model.unload_model(to_cpu=True)
+            _model_state = "swapped"
+            print("↓ 閒置,VRAM 已釋放(權重暫存於 CPU RAM)", flush=True)
+        except Exception as e:
+            print(f"× VRAM 釋放失敗: {e}", flush=True)
+
+
+def _ensure_loaded():
+    """Swap weights back to the configured device if currently on CPU RAM."""
+    with _model_lock:
+        global _model_state
+        if _model is None or _model_state == "loaded":
+            return
+        t0 = time.time()
+        try:
+            _model.model.load_model()
+            _model_state = "loaded"
+            print(f"↑ VRAM 重載({time.time() - t0:.1f}s)", flush=True)
+        except Exception as e:
+            print(f"× VRAM 重載失敗: {e}", flush=True)
+
+
+def _cancel_idle_unload():
+    global _idle_timer
+    with _model_lock:
+        if _idle_timer is not None:
+            _idle_timer.cancel()
+            _idle_timer = None
+
+
+def _schedule_idle_unload():
+    """Reset the inactivity timer that triggers _swap_to_cpu."""
+    global _idle_timer
+    if _model_device != "cuda" or config.IDLE_UNLOAD_SEC <= 0:
+        return
+    with _model_lock:
+        if _idle_timer is not None:
+            _idle_timer.cancel()
+        _idle_timer = threading.Timer(config.IDLE_UNLOAD_SEC, _swap_to_cpu)
+        _idle_timer.daemon = True
+        _idle_timer.start()
 
 
 def _beep(freq, ms=90):
@@ -66,6 +138,9 @@ def _audio_cb(indata, frames_count, time_info, status):
 
 
 def start_recording():
+    # User is interacting again — keep the model on GPU for the duration of
+    # this round; new unload timer will be scheduled after transcription.
+    _cancel_idle_unload()
     with _lock:
         if _state["recording"]:
             return
@@ -133,20 +208,25 @@ def stop_and_submit():
 
     print("… 轉錄中", flush=True)
     try:
-        segments, _info = _model.transcribe(
-            audio_f32, language=config.LANGUAGE, beam_size=1, vad_filter=True,
-        )
-        text = "".join(seg.text for seg in segments).strip()
+        with _model_lock:
+            _ensure_loaded()
+            segments, _info = _model.transcribe(
+                audio_f32, language=config.LANGUAGE, beam_size=1, vad_filter=True,
+            )
+            text = "".join(seg.text for seg in segments).strip()
     except Exception as e:
         print(f"× 轉錄失敗: {e}", flush=True)
+        _schedule_idle_unload()
         return
 
     if not text:
         print("× 轉錄結果為空", flush=True)
+        _schedule_idle_unload()
         return
     print(f"→ {text}", flush=True)
     _paste_and_submit(text)
     _beep(1200, 70)
+    _schedule_idle_unload()
 
 
 def discard_recording():
@@ -161,6 +241,7 @@ def discard_recording():
         stream.stop()
         stream.close()
     print("⏹ 錄音已作廢", flush=True)
+    _schedule_idle_unload()
 
 
 def inject_key(key):

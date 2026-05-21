@@ -130,6 +130,7 @@ Edit `.env` in the repo root.
 | `WHISPER_MODEL_SIZE` | auto | `large-v3-turbo` on CUDA, `small` on CPU. |
 | `WHISPER_DEVICE` | auto | `cuda` or `cpu`. |
 | `WHISPER_COMPUTE_TYPE` | auto | `float16` on CUDA, `int8` on CPU. |
+| `VOICE_IDLE_UNLOAD_SEC` | `300` | CUDA only: after this many idle seconds, weights are swapped from VRAM to CPU RAM so other workloads can use the GPU. Next transcription pays a ~1-2s reload. Set `0` to keep the model resident on the GPU. |
 
 ## Voice marker
 
