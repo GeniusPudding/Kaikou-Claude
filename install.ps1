@@ -1,4 +1,4 @@
-# Install kaikou-claude: create venv, install deps, register Claude Code hooks.
+# Install Kaikou-Claude: create venv, install deps, register Claude Code hooks.
 # Safe to re-run (idempotent). Invoke from the repo root: .\install.ps1
 
 $ErrorActionPreference = 'Stop'
@@ -46,7 +46,7 @@ if ([version]$pyVerStr -lt [version]'3.9') {
 #    auto-picks CUDA + large-v3-turbo on GPU machines, CPU + small otherwise.
 if (-not (Test-Path $envFile)) {
     @(
-        '# kaikou-claude runtime config',
+        '# Kaikou-Claude runtime config',
         'VOICE_LANGUAGE=zh',
         'VOICE_AUTO_SUBMIT=1',
         'VOICE_MARKER= <voice>',

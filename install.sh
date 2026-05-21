@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install kaikou-claude on macOS / Linux: create venv, install deps,
+# Install Kaikou-Claude on macOS / Linux: create venv, install deps,
 # register Claude Code hooks. Safe to re-run (idempotent).
 
 set -euo pipefail
@@ -59,7 +59,7 @@ fi
 # 6. Default .env — only if missing.
 if [[ ! -f "$env_file" ]]; then
     cat > "$env_file" <<'EOF'
-# kaikou-claude runtime config
+# Kaikou-Claude runtime config
 VOICE_LANGUAGE=zh
 VOICE_AUTO_SUBMIT=1
 VOICE_MARKER= <voice>

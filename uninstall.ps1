@@ -1,4 +1,4 @@
-# Uninstall kaikou-claude hooks and stop the daemon.
+# Uninstall Kaikou-Claude hooks and stop the daemon.
 # Repo files are kept on disk; delete manually if no longer needed.
 
 $ErrorActionPreference = 'Continue'

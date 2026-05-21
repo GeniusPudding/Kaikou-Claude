@@ -41,21 +41,21 @@ if [[ ! -x "$python_bin" ]]; then
     done
 
     if [[ -z "$python_cmd" ]]; then
-        echo '{"systemMessage":"[kaikou-claude] Python not found. Please install Python 3.9+ or run install.sh."}'
+        echo '{"systemMessage":"[Kaikou-Claude] Python not found. Please install Python 3.9+ or run install.sh."}'
         exit 1
     fi
 
     # Quick venv setup
     echo "Creating venv..." >&2
     "$python_cmd" -m venv "$voice_dir/.venv" 2>/dev/null || {
-        echo '{"systemMessage":"[kaikou-claude] Failed to create venv. Run install.sh to set up properly."}'
+        echo '{"systemMessage":"[Kaikou-Claude] Failed to create venv. Run install.sh to set up properly."}'
         exit 1
     }
 
     echo "Installing dependencies..." >&2
     "$python_bin" -m pip install --upgrade pip -q >/dev/null 2>&1
     "$python_bin" -m pip install -r "$voice_dir/requirements.txt" -q >/dev/null 2>&1 || {
-        echo '{"systemMessage":"[kaikou-claude] Dependency installation failed. Run install.sh to fix."}'
+        echo '{"systemMessage":"[Kaikou-Claude] Dependency installation failed. Run install.sh to fix."}'
         exit 1
     }
 fi

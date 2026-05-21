@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Uninstall kaikou-claude hooks and stop the daemon (macOS / Linux).
+# Uninstall Kaikou-Claude hooks and stop the daemon (macOS / Linux).
 # Repo files are kept on disk; delete the directory manually if desired.
 
 set -u

@@ -35,7 +35,7 @@ if (-not (Test-Path $pythonw)) {
     }
 
     if (-not $python) {
-        Write-Output '{"systemMessage":"[kaikou-claude] Python not found. Please install Python 3.9+ or run install.ps1."}'
+        Write-Output '{"systemMessage":"[Kaikou-Claude] Python not found. Please install Python 3.9+ or run install.ps1."}'
         exit 1
     }
 
@@ -44,7 +44,7 @@ if (-not (Test-Path $pythonw)) {
     try {
         & $python -m venv "$voiceDir\.venv" 2>$null
     } catch {
-        Write-Output '{"systemMessage":"[kaikou-claude] Failed to create venv. Run install.ps1 to set up properly."}'
+        Write-Output '{"systemMessage":"[Kaikou-Claude] Failed to create venv. Run install.ps1 to set up properly."}'
         exit 1
     }
 
@@ -54,7 +54,7 @@ if (-not (Test-Path $pythonw)) {
         & $venvPython -m pip install --upgrade pip -q 2>$null
         & $venvPython -m pip install -r "$voiceDir\requirements.txt" -q 2>$null
     } catch {
-        Write-Output '{"systemMessage":"[kaikou-claude] Dependency installation failed. Run install.ps1 to fix."}'
+        Write-Output '{"systemMessage":"[Kaikou-Claude] Dependency installation failed. Run install.ps1 to fix."}'
         exit 1
     }
 }
