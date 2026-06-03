@@ -50,6 +50,18 @@ _lock = threading.Lock()
 # is sent to whatever window is foreground at paste time, so we restore
 # this one before pasting in case the user switched apps mid-recording.
 _target_handle = None
+# Hotkey backends snapshot the foreground window at key-down (before any
+# hold delay) and stash it here. start_recording prefers it over a fresh
+# live capture so the paste target is the window that was active when
+# the user *initiated* the press, not the one that happens to be active
+# 250ms later if they alt-tabbed.
+_pending_target = None
+
+
+def set_pending_target(handle):
+    """Called from hotkey backends at key-down to snapshot the target."""
+    global _pending_target
+    _pending_target = handle
 
 # Model slots and active selector. Only ever access via the helpers below
 # under _model_lock so the sentinel watcher and the hotkey transcribe path
@@ -244,10 +256,16 @@ def _audio_cb(indata, frames_count, time_info, status):
 
 
 def start_recording():
-    global _target_handle
-    # Snapshot the current foreground window now, so the eventual paste
-    # lands here regardless of where the user is looking when we finish.
-    _target_handle = focus.capture_target_window()
+    global _target_handle, _pending_target
+    # Prefer the snapshot taken at key-down by the hotkey backend; only
+    # fall back to a live capture if it didn't set one (e.g. a code path
+    # we didn't update). The key-down snapshot eliminates the 250ms gap
+    # during which the user could have switched windows.
+    if _pending_target is not None:
+        _target_handle = _pending_target
+        _pending_target = None
+    else:
+        _target_handle = focus.capture_target_window()
     with _lock:
         if _state["recording"]:
             return
@@ -269,6 +287,19 @@ def start_recording():
 
 
 def _paste_and_submit(text: str):
+    # Before doing anything destructive (clipboard write + key injection),
+    # re-verify the captured target still belongs to an AI agent. If focus
+    # detection had a stale-cache race at key-down — or the original window
+    # has since been closed / replaced — the safest move is to drop the
+    # paste rather than dump the transcription into someone's chat app.
+    if _target_handle is not None and not focus.is_voice_target_handle(_target_handle):
+        print(
+            "⚠ 目的視窗已不是 AI agent,放棄貼上(避免污染其他輸入框)",
+            flush=True,
+        )
+        print(f"   轉錄結果: {text}", flush=True)
+        return
+
     payload = f"{text}{config.VOICE_MARKER}" if config.VOICE_MARKER else text
     saved = ""
     try:

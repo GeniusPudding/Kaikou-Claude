@@ -263,6 +263,52 @@ def restore_target_window(handle) -> bool:
     return _restore_target(handle)
 
 
+def _resolve_handle_pid(handle):
+    """Resolve a capture/restore handle back to an owning process PID,
+    so we can re-run the AI-agent check on it before pasting."""
+    if not handle:
+        return 0
+    if config.IS_WIN:
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        user32.GetWindowThreadProcessId.argtypes = [
+            wintypes.HWND, ctypes.POINTER(wintypes.DWORD),
+        ]
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(wintypes.HWND(handle), ctypes.byref(pid))
+        return int(pid.value or 0)
+    if config.IS_MAC:
+        # The mac handle IS the PID (see _build_target_helpers).
+        try:
+            return int(handle)
+        except (TypeError, ValueError):
+            return 0
+    # Linux X11: handle is an xdotool window id (decimal or 0x... string).
+    import subprocess
+    try:
+        out = subprocess.check_output(
+            ["xdotool", "getwindowpid", str(handle)],
+            stderr=subprocess.DEVNULL, timeout=0.3, text=True,
+        ).strip()
+        return int(out) if out else 0
+    except (FileNotFoundError, subprocess.CalledProcessError,
+            subprocess.TimeoutExpired, ValueError):
+        return 0
+
+
+def is_voice_target_handle(handle) -> bool:
+    """Re-verify that a previously-captured window handle still belongs to
+    an AI-agent process tree. Used right before paste so an in-flight
+    transcription can't accidentally land in an unrelated window (social
+    apps, browsers, etc.) if focus detection had a stale-cache race at
+    the moment of key-down."""
+    pid = _resolve_handle_pid(handle)
+    if not pid:
+        return False
+    return _is_voice_target(pid)
+
+
 def _looks_like_cc(proc: psutil.Process) -> bool:
     try:
         name = (proc.name() or "").lower()

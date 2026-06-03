@@ -20,7 +20,7 @@ from ctypes import wintypes
 
 from pynput import keyboard as kb
 
-from .. import audio, config
+from .. import audio, config, focus
 from ..focus import is_claude_code_focused
 
 _user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -92,6 +92,11 @@ def _handle_space_down():
         t = threading.Timer(config.HOLD_THRESHOLD_SEC, _upgrade_to_recording)
         _hk["timer"] = t
         t.start()
+    # Snapshot the target window NOW, before the 250ms hold timer fires.
+    # If the user alt-tabs during the wait, the paste will still go back to
+    # whatever window they pressed Space in — not whatever happens to be
+    # foreground when the timer expires.
+    audio.set_pending_target(focus.capture_target_window())
     threading.Thread(target=audio.inject_key, args=(kb.Key.space,), daemon=True).start()
 
 
@@ -119,6 +124,8 @@ def _handle_f9_down():
         if _hk["state"] != "idle":
             return
         _hk["state"] = "f9_recording"
+    # Snapshot now so the paste lands where the user pressed F9.
+    audio.set_pending_target(focus.capture_target_window())
     threading.Thread(target=audio.start_recording, daemon=True).start()
 
 

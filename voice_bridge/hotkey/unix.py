@@ -20,7 +20,7 @@ import time
 
 from pynput import keyboard as kb
 
-from .. import audio, config
+from .. import audio, config, focus
 from ..focus import is_claude_code_focused
 
 _CMD_KEYS = {kb.Key.cmd, kb.Key.cmd_l, kb.Key.cmd_r}
@@ -65,6 +65,11 @@ def _on_press(key):
     if key in _TRIGGER_KEYS:
         if not is_claude_code_focused():
             return
+        # Snapshot the foreground window now, *before* start_recording, so
+        # the paste lands wherever the user actually pressed the trigger
+        # key — not whatever window happens to be active by the time the
+        # transcription returns.
+        audio.set_pending_target(focus.capture_target_window())
         with _lock:
             _state["mode"] = "recording"
             _state["cancelled"] = False
